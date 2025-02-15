@@ -1,10 +1,20 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 import shutil
 import os
 from datetime import datetime
 
 app = FastAPI()
+
+# Add CORS middleware - allow all origins for now (not recommended for production)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Or specify the origins you want to allow
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Create uploads directory if it doesn't exist
 UPLOAD_DIR = "uploads"
