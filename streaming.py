@@ -1,4 +1,6 @@
 import cv2
+import requests
+import json
 
 def stream_webcam():
     # Open a connection to the webcam (0 is usually the default camera)
@@ -19,9 +21,28 @@ def stream_webcam():
         # Display the resulting frame
         cv2.imshow('Webcam Stream', frame)
 
+        # Check for key presses
+        key = cv2.waitKey(1) & 0xFF
+        
         # Break the loop on 'q' key press
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if key == ord('q'):
             break
+        # Capture frame on spacebar press
+        elif key == ord(' '):
+            # Convert frame to jpg format
+            _, img_encoded = cv2.imencode('.jpg', frame)
+            # Convert to bytes
+            img_bytes = img_encoded.tobytes()
+            
+            try:
+                # Send the image to the API endpoint
+                response = requests.post(
+                    'http://localhost:000/api/v1/example',
+                    files={'image': ('image.jpg', img_bytes, 'image/jpeg')}
+                )
+                print(f"Image sent to API. Response: {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                print(f"Error sending image to API: {e}")
 
     # Release the webcam and close windows
     cap.release()
