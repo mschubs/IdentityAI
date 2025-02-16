@@ -20,7 +20,7 @@ def detect_primary_faces(image_path, upsample=1, model='hog'):
     
     # Crop image by 50 pixels on all sides
     height, width = image.shape[:2]
-    image = image[50:height-50, 50:width-50]
+    image = image[100:height-100, 100:width-100]
     
     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     
@@ -87,7 +87,7 @@ def detect_primary_faces(image_path, upsample=1, model='hog'):
     return primary_faces, annotated_image, cropped_faces
 
 if __name__ == "__main__":
-    image_path = "uploads/IMG_1173.jpeg"
+    image_path = "uploads/20250216_023657.jpg"
     # image_path = "ID_Images/IMG_9276.jpg"
     primary_faces, annotated_image, cropped_faces = detect_primary_faces(image_path)
     
