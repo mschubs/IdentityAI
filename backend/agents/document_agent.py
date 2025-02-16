@@ -8,7 +8,7 @@ import os
 from dotenv import load_dotenv
 import cv2
 import json
-from document_agent_helpers.face_detection import detect_primary_faces
+from .document_agent_helpers.face_detection import detect_primary_faces_yolo
 
 class DocumentParsingAgent:
     """
@@ -22,7 +22,6 @@ class DocumentParsingAgent:
         self.schema = {
             "observed": {
                 "profileImage": str,
-                "capturedImage": str,
                 "name": str,
                 "address-line-1": str,
                 "address-line-2": str,
@@ -87,11 +86,11 @@ class DocumentParsingAgent:
             }
 
     # Function to encode the image
-    def encode_image(image_path):
+    def encode_image(self, image_path):
         with open(image_path, "rb") as image_file:
             return base64.b64encode(image_file.read()).decode('utf-8')
 
-    def parse_id_document(self, image_path) -> Dict[str, str]:
+    def parse_id_document(self, image_path, face_image_path) -> Dict[str, str]:
         """
         Parses an ID image and returns structured data.
 
@@ -102,26 +101,32 @@ class DocumentParsingAgent:
             Dict[str, str]: A dictionary containing ID fields.
         """
         # Process face detection first
-        _, _, cropped_faces, id_card_image = detect_primary_faces(image_path)
-        
-        # Save cropped face if detected
+        # _, _, cropped_faces, id_card_image = detect_primary_faces(image_path)
+        print("image_path ", image_path)
+        _, _, cropped_faces_face = detect_primary_faces_yolo(face_image_path)
+        _, _, cropped_faces_id = detect_primary_faces_yolo(image_path)
+
+        # Save cropped faces
         cropped_IRL_image_path = None
         cropped_ID_image_path = None
-        if cropped_faces is not None:
+        if cropped_faces_id is not None:
             base_name = image_path.split('/')[-1]
-            cropped_IRL_image_path = "cropped_IRL_" + base_name
-            cv2.imwrite(cropped_IRL_image_path, cv2.cvtColor(cropped_faces[0], cv2.COLOR_RGB2BGR))
-            cropped_ID_image_path = "cropped_ID_" + base_name
-            cv2.imwrite(cropped_ID_image_path, cv2.cvtColor(cropped_faces[1], cv2.COLOR_RGB2BGR))
+            # write face
+            cropped_IRL_image_path = "uploads-modified/cropped_IRL_" + base_name
+            cv2.imwrite(cropped_IRL_image_path, cropped_faces_face)
+
+            # write license pic
+            cropped_ID_image_path = "uploads-modified/cropped_ID_" + base_name
+            cv2.imwrite(cropped_ID_image_path, cropped_faces_id)
 
         # Use id_card_image if available, otherwise use original image
         image_to_encode = image_path
-        if id_card_image is not None:
-            # Save the ID card image temporarily
-            base_name = image_path.split('/')[-1]
-            temp_id_path = "temp_id_" + base_name
-            cv2.imwrite(temp_id_path, cv2.cvtColor(id_card_image, cv2.COLOR_RGB2BGR))
-            image_to_encode = temp_id_path
+        # if id_card_image is not None:
+        #     # Save the ID card image temporarily
+        #     base_name = image_path.split('/')[-1]
+        #     temp_id_path = "temp_id_" + base_name
+        #     cv2.imwrite(temp_id_path, cv2.cvtColor(id_card_image, cv2.COLOR_RGB2BGR))
+        #     image_to_encode = temp_id_path
 
         # Getting the base64 string
         base64_image = self.encode_image(image_to_encode)
@@ -176,6 +181,7 @@ class DocumentParsingAgent:
 
         # Add the profile image path to the result if face was detected
         result_dict = json.loads(result)
-        result_dict['observed']['profileImage'] = cropped_IRL_image_path if cropped_IRL_image_path else ""
-        result_dict['observed']['capturedImage'] = cropped_ID_image_path if cropped_ID_image_path else ""
+        # result_dict['observed']['profileImage'] = cropped_IRL_image_path if cropped_IRL_image_path else ""
+        result_dict['observed']['profileImage'] = cropped_ID_image_path if cropped_ID_image_path else ""
+        result_dict['observed']['faceImage'] = cropped_ID_image_path if cropped_ID_image_path else ""
         return json.dumps(result_dict, indent=2)

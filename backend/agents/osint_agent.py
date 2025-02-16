@@ -39,6 +39,7 @@ from firecrawl import FirecrawlApp
 app = FirecrawlApp(api_key="fc-28cce56afd4c4218852a6a700a2099d4")
 
 load_dotenv('secret.env')  # Load variables from .env
+load_dotenv('.env')  # Load variables from .env
 
 # ---------------------------------------------------------
 # 3. OSINT Agent (Stub)
@@ -60,8 +61,8 @@ class OSINTAgent:
         #     "LastName": "Srikrishna",
         # }
         payload = {
-            "FirstName": args["firstName"],
-            "LastName": args["lastName"],
+            "FirstName": args["FirstName"],
+            "LastName": args["LastName"],
             "Addresses": [
                 {
                     "AddressLine2": args.get("address2", ""),
