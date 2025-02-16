@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 import cv2
 import json
-from face_detection import detect_primary_face
+from face_detection import detect_primary_faces
 
 # Load environment variables
 load_dotenv('secret.env')
@@ -18,7 +18,8 @@ schema = {
     "observed": {
         "profileImage": str,
         "name": str,
-        "address": str,
+        "address-line-1": str,
+        "address-line-2": str,
         "dateOfBirth": str,
         "expiryDate": str,
         "nationality": str,
@@ -81,18 +82,31 @@ stateIDFormats = {
 };
 
 def process_id_image(image_path):
-    # Getting the base64 string
-    base64_image = encode_image(image_path)
-
     # Process face detection first
-    _, _, cropped_face = detect_primary_face(image_path)
+    _, _, cropped_faces, id_card_image = detect_primary_faces(image_path)
     
     # Save cropped face if detected
-    cropped_image_path = None
-    if cropped_face is not None:
+    cropped_IRL_image_path = None
+    if cropped_faces is not None:
         base_name = image_path.split('/')[-1]
-        cropped_image_path = "cropped_" + base_name
-        cv2.imwrite(cropped_image_path, cv2.cvtColor(cropped_face, cv2.COLOR_RGB2BGR))
+        cropped_IRL_image_path = "cropped_" + base_name
+        cv2.imwrite(cropped_IRL_image_path, cv2.cvtColor(cropped_faces[0], cv2.COLOR_RGB2BGR))
+
+    # Use id_card_image if available, otherwise use original image
+    image_to_encode = image_path
+    if id_card_image is not None:
+        # Save the ID card image temporarily
+        base_name = image_path.split('/')[-1]
+        temp_id_path = "temp_id_" + base_name
+        cv2.imwrite(temp_id_path, cv2.cvtColor(id_card_image, cv2.COLOR_RGB2BGR))
+        image_to_encode = temp_id_path
+
+    # Getting the base64 string
+    base64_image = encode_image(image_to_encode)
+
+    # # Clean up temporary file if it was created
+    # if id_card_image is not None:
+    #     os.remove(temp_id_path)
 
     # Initialize client with API key from environment
     client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
@@ -100,8 +114,10 @@ def process_id_image(image_path):
     chat_completion = client.messages.create(
         temperature=0,
         system="""
-        You are a world-class OCR machine. We are working to distinguish between fake and real IDs. 
-        Do not create any new information that is not on the ID itself. 
+        You are a specialized OCR system for ID verification. Focus on:
+        1. Exact text extraction without inference
+        We are working to distinguish between fake and real IDs. 
+        Do not create any NEW INFORMATION that is not on the ID itself. 
         Do not add respond with any additional information, only respond with the JSON object.""",
         messages=[
             {
@@ -138,12 +154,12 @@ def process_id_image(image_path):
     
     # Add the profile image path to the result if face was detected
     result_dict = json.loads(result)
-    result_dict['observed']['profileImage'] = cropped_image_path if cropped_image_path else ""
+    result_dict['observed']['profileImage'] = cropped_IRL_image_path if cropped_IRL_image_path else ""
     return json.dumps(result_dict, indent=2)
 
 # Example usage:
 if __name__ == "__main__":
     # Path to your image
-    image_path = "ID_Images/IMG_9276.jpg"
+    image_path = "ID_Images/Nandan+ID.jpeg"
     result = process_id_image(image_path)
     print(result)
