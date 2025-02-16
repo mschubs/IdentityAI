@@ -176,7 +176,8 @@ class OSINTAgent:
             - Optionally, if an address is mentioned, include `address`.
         
         2. **Sonar Query ("sonar")**:  
-        - Use this function for general queries that do not require person-specific parameters or more vague questions of a person.  
+        - Use this function for general queries that do not require person-specific parameters or more vague questions of a person.
+        - For example, if the query is asking about a person's social media profiles, use the sonar function.
         - In this case, choose an appropriate query for the Sonar API.
         - Sonar queries can be used for more complex queries that require a more general search.
 
@@ -327,7 +328,7 @@ if __name__ == "__main__":
         # response = agent.run_sonar_query("Who is Nandan Srikrishna?")
         # print("Response from run_sonar_query:", response)
 
-        result = agent.choose_best_function("Who is Nandan Srikrishna?")
+        result = agent.choose_best_function("Does Nandan Srikrishna have a Linkedin?")
         print("Result from choose_best_function:", result)
 
         # result = agent.choose_best_function("Who is Nandan Srikrishna?")
