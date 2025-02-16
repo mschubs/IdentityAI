@@ -4,6 +4,7 @@ from enum import Enum
 import os
 import shutil
 import json
+import datetime
 
 from document_agent import DocumentParsingAgent
 from reverse_image_agent import ReverseImageAgent
@@ -117,6 +118,25 @@ class OrchestratorAgent:
         address1 = observed_data["address-line-1"]
         address2 = observed_data["address-line-2"]
         dateOfBirth = observed_data["dateOfBirth"]
+        
+        # Add age calculation via LLM
+        age_prompt = f"""Given today's date and a date of birth, calculate the person's current age.
+        Date of Birth: {dateOfBirth}
+        Today's Date: {datetime.date.today()}
+        
+        Return only a number representing the age in years."""
+        
+        age_response = self.decision_agent.client.chat.completions.create(
+            messages=[{"role": "user", "content": age_prompt}],
+            model="gpt-4o",
+            temperature=0
+        )
+        calculated_age = age_response.choices[0].message.content.strip()
+        observed_data["calculatedAge"] = calculated_age
+
+        print("birthday: ", dateOfBirth)
+        print("calculated_age: ", calculated_age)
+        
         cropped_ID_image_path = observed_data["profileImage"]
         cropped_face_image_path = observed_data["faceImage"]
 

@@ -242,6 +242,44 @@ class DecisionAgent:
                 "CONFIDENCE_LEVEL": "high"
             }
 
+        # Check age consistency between ID and OSINT data
+        id_age = id_data.get("calculatedAge")
+        osint_age = None
+        
+        # Extract age from OSINT data using LLM
+        age_prompt = f"""Given this OSINT data about a person, determine their age. 
+        If multiple ages are found, return the most reliable one.
+        If no exact age is found but you can infer it from other data, do so.
+        Return only a number, or null if you cannot determine the age with reasonable confidence.
+
+        OSINT Data: {json.dumps(osint_data, indent=2)}"""
+
+        age_response = self.client.chat.completions.create(
+            messages=[{"role": "user", "content": age_prompt}],
+            model="gpt-4o",
+            temperature=0
+        )
+        
+        osint_age = age_response.choices[0].message.content.strip()
+        if osint_age.lower() == "null":
+            osint_age = None
+            
+        if id_age and osint_age:
+            try:
+                id_age = int(id_age)
+                osint_age = int(osint_age)
+                
+                # Allow for small discrepancies due to different reference dates
+                if abs(id_age - osint_age) != 0:
+                    return {
+                        "REASONING": f"Age mismatch: ID shows {id_age}, OSINT shows {osint_age}",
+                        "ACTION": "FINAL_INVALID",
+                        "CONFIDENCE_LEVEL": "medium"
+                    }
+            except ValueError:
+                # If age parsing fails, continue with other checks
+                pass
+        
         # For ambiguous cases, let the LLM make the final call
         content = f"""
         ID Data: {id_data}
