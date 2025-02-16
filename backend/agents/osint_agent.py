@@ -51,7 +51,7 @@ class OSINTAgent:
     def __init__(self):
         self.key_name = os.getenv('ENDATO_KEY_NAME')
         self.key_pass = os.getenv('ENDATO_KEY_PASS')
-        pass
+        self.previous_fastpeople_queries = []
 
     def run_fastpeople(self, args: Dict[str, Any]) -> str:
         # sample_payload = {
@@ -68,6 +68,13 @@ class OSINTAgent:
                 }
             ],
         }
+
+        # Append only the relevant payload without FilterOptions
+        self.previous_fastpeople_queries.append({
+            "FirstName": payload["FirstName"],
+            "LastName": payload["LastName"],
+            "Addresses": payload["Addresses"]
+        })
 
         payload['FilterOptions'] = [
             "IncludeEmptyFirstNameResults",
@@ -123,16 +130,59 @@ class OSINTAgent:
         returns the result of that function.
         """
         groq_prompt = '''
-        {
-        "function": $query match "*person search*" ? "person" : "sonar",
-        "parameters": $query match "*person search*" ? {
-            "firstName": substring($query, 0, indexOf($query, " ")),
-            "lastName": substring($query, indexOf($query, " ") + 1)
-        } : {
-            "query": $query
-        }
-        }
+        You are an assistant tasked with selecting the most appropriate API function based on the user's query. There are two functions available:
+        1. **Person Search ("person")**:  
+        - Use this function when the query appears to be asking for information about a specific person.  
+        - The query may include personal details such as a person's name, and optionally an address.  
+        - When using the person search function, extract:
+            - `firstName`: The person's first name.
+            - `lastName`: The person's last name.
+            - Optionally, if an address is mentioned, include `address`.
+        
+        2. **Sonar Query ("sonar")**:  
+        - Use this function for general queries that do not require person-specific parameters or more vague questions of a person.  
+        - In this case, choose an appropriate query for the Sonar API.
+
+        Return your decision as a JSON object in one of the following formats:
+
+        **Example for Person Search (with address):**
+        {{
+        "function": "person",
+        "parameters": {{
+            "firstName": "John",
+            "lastName": "Doe",
+            "address": "123 Elm Street"
+        }}
+        }}
+
+        **Example for Person Search (without address):**
+        {{
+        "function": "person",
+        "parameters": {{
+            "firstName": "John",
+            "lastName": "Doe"
+        }}
+        }}
+
+        **Example for Sonar Query:**
+        {{
+        "function": "sonar",
+        "parameters": {{
+            "query": "Who is John Doe?"
+        }}
+        }}
+
+        Even if the query does not explicitly mention "person search," use the context and details provided (such as names or addresses) to decide if the person search function should be used. If not, default to the sonar function.
+
+        Here are the previous fast people queries (to avoid duplicates):
+        {previous_queries}
+
+        Please output only the JSON object without any additional text or formatting.
+
+        The input query is: "{query}"
         '''
+
+        groq_prompt = groq_prompt.format(query=query, previous_queries=json.dumps(self.previous_fastpeople_queries))
 
         # Instantiate the Groq client using the API key from environment variables.
         client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
@@ -151,6 +201,7 @@ class OSINTAgent:
             groq_response = json.loads(response_content)
         except json.JSONDecodeError:
             # Fallback to simple matching if JSON parsing fails.
+            print("JSON parsing failed")
             if "person search" in query.lower():
                 groq_response = {
                     "function": "person",
@@ -165,7 +216,7 @@ class OSINTAgent:
                     "parameters": {"query": query}
                 }
     
-        print(groq_response)
+        print("Groq response:", groq_response)
 
         # Decide which function to call based on the Groq response.
         if groq_response.get("function") == "person":
@@ -178,7 +229,6 @@ class OSINTAgent:
             result = self.run_sonar_query(sonar_query)
         
         return result
-
 
 
     # Not Used
@@ -240,7 +290,10 @@ if __name__ == "__main__":
         # response = agent.run_sonar_query("Who is Nandan Srikrishna?")
         # print("Response from run_sonar_query:", response)
 
-        result = agent.choose_best_function("Nandan Srikrishna person search")
+        result = agent.choose_best_function("Who is Nandan Srikrishna?")
         print("Result from choose_best_function:", result)
+
+        result = agent.choose_best_function("Who is Nandan Srikrishna?")
+        print("Result2 from choose_best_function:", result)
     except Exception as e:
         print(f"Error occurred: {str(e)}")
