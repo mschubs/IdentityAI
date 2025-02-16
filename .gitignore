@@ -1,2 +1,7 @@
+/venv
+/secret.env
+/ID_Images*
+/__pycache__*
+reverse_search/
 uploads/
 reverse_search/profile/
