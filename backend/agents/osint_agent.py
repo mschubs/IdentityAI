@@ -39,7 +39,7 @@ from firecrawl import FirecrawlApp
 app = FirecrawlApp(api_key="fc-28cce56afd4c4218852a6a700a2099d4")
 
 load_dotenv('secret.env')  # Load variables from .env
-load_dotenv('.env')  # Load variables from .env
+load_dotenv('secret.env')  # Load variables from .env
 
 # ---------------------------------------------------------
 # 3. OSINT Agent (Stub)
@@ -55,17 +55,13 @@ class OSINTAgent:
         self.previous_fastpeople_queries = []
 
     def run_fastpeople(self, args: Dict[str, Any]) -> str:
-        # sample_payload = {
-        #     "FirstName": "Nandan",
-        #     "MiddleName": "M",
-        #     "LastName": "Srikrishna",
-        # }
+        # Convert lowercase keys to uppercase for the API
         payload = {
-            "FirstName": args["FirstName"],
-            "LastName": args["LastName"],
+            "FirstName": args.get("firstName", args.get("FirstName", "")),
+            "LastName": args.get("lastName", args.get("LastName", "")),
             "Addresses": [
                 {
-                    "AddressLine2": args.get("address2", ""),
+                    "AddressLine2": args.get("address", ""),
                 }
             ],
         }
@@ -120,9 +116,22 @@ class OSINTAgent:
             ]
         }
 
-        response = requests.post(url, headers=headers, json=payload)
-
-        return response.json()
+        try:
+            response = requests.post(url, headers=headers, json=payload)
+            response.raise_for_status()  # Raise an exception for bad status codes
+            
+            # Print response details for debugging
+            print(f"Response status code: {response.status_code}")
+            print(f"Response text: {response.text}")
+            
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"API request failed: {str(e)}")
+            return {"error": str(e)}
+        except json.JSONDecodeError as e:
+            print(f"Failed to parse JSON response: {str(e)}")
+            print(f"Raw response: {response.text}")
+            return {"error": "Invalid JSON response"}
     
     def choose_best_function(self, query: str) -> str:
         """
@@ -224,11 +233,12 @@ class OSINTAgent:
             print("Running fast people search")
             params = groq_response.get("parameters", {})
             result = self.run_fastpeople(params)
+            print(f"Result for method person: {result}")
         else:
             print("Running Sonar API")
             sonar_query = groq_response.get("parameters", {}).get("query", query)
             result = self.run_sonar_query(sonar_query)
-        
+            print(f"Result for method Sonar: {result}")
         return result
 
 

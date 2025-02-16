@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import json
 from groq import Groq
 
-load_dotenv('.env')  # Load variables from .env
+load_dotenv('secret.env')  # Load variables from .env
 
 client = Groq(
     api_key=os.environ.get("GROQ_API_KEY"),

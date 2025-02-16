@@ -1,43 +1,45 @@
-from typing import Dict, Any, Optional
+# decision_agent.py
+
+from typing import Dict, Any
 import os
 from dotenv import load_dotenv
 import json
 from groq import Groq
 import time
 
-# ---------------------------------------------------------
-# 4. Decision (Cross-Checking) Agent (Stub)
-# ---------------------------------------------------------
-
 deepseek_model = "deepseek-r1-distill-llama-70b"
 llama_model = "llama-3.3-70b-versatile"
 
+# We'll redefine this prompt so the DecisionAgent can request more data explicitly:
 system_prompt = """
-Given your context, decide if the ID information aligns with the other information we have gathered enough to be confident that the ID is real, or if there are enough misalignments such that we can be confident the ID is fake.
+You are deciding if the ID is valid or not, based on:
+ - ID Data
+ - Face similarity
+ - OSINT data (which may be partial or incomplete)
+ - Past queries or new queries.
 
-Success Criteria:
-- Face photos match with high confidence
-- ID data matches OSINT records
-- No significant discrepancies found
-- No evidence of fraud or manipulation
-- Multiple data points confirm identity
+**You may request more data** if the OSINT data is insufficient.
 
-Red Flags:
-- Face mismatch
-- Address discrepancies
-- Age/DOB inconsistencies
-- Recent ID issuance with older person
-- Conflicting public records
-- Signs of document manipulation
+Return only valid JSON with the following fields:
 
-Return your answer in json format with only the following three fields.
-1. REASONING: reasoning for the decision you are making
-2. CONFIDENCE_LEVEL: high confidence, medium confidence, low confidence
-3. STATUS: valid or invalid
+{
+  "REASONING": "A short text explaining your reasoning.",
+  "ACTION": one of ["REQUEST_MORE_DATA", "FINAL_VALID", "FINAL_INVALID"],
+  "REQUEST_QUERY": "If ACTION=REQUEST_MORE_DATA, put a short query or direction for the OSINT agent here. Otherwise empty.",
+  "CONFIDENCE_LEVEL": "One of [high, medium, low]"
+}
 
+Criteria for validity:
+- Face match is relatively high (≥0.7 or so).
+- ID data matches the OSINT data (or no major contradictions).
+- No strong red flags.
+
+If the data is definitely contradictory, declare FINAL_INVALID.
+If you are confident the ID is real, declare FINAL_VALID.
+If you need more data, set ACTION=REQUEST_MORE_DATA and fill in REQUEST_QUERY with the data you need from OSINT.
 """
 
-def create_chat_completion(content, model, client):  # New function to create chat completion
+def create_chat_completion(content, model, client):
     return client.chat.completions.create(
         messages=[
             {
@@ -48,47 +50,14 @@ def create_chat_completion(content, model, client):  # New function to create ch
         model=model,
     )
 
-def extract_json(text):  # Find content between json and markers
-    start_marker = "json"
-    end_marker = "```"
-    
-    try:
-        # Find the start of JSON content
-        start_index = text.find(start_marker) + len(start_marker)
-        
-        # Find the end of JSON content
-        end_index = text.find(end_marker, start_index)
-        
-        if start_index == -1 or end_index == -1:
-            raise ValueError("JSON markers not found in text")
-            
-        # Extract the JSON string
-        json_str = text[start_index:end_index].strip()
-        
-        # Parse the JSON string
-        return json.loads(json_str)
-        
-    except Exception as e:
-        print(f"Error extracting JSON: {e}")
-        return None
-
-def run_groq(content, model, client):
-    chat_completion = create_chat_completion(content, model, client)
-    response_content = chat_completion.choices[0].message.content
-    print(response_content)
-    return extract_json(response_content)
-
 class DecisionAgent:
     """
     Agent responsible for combining all extracted data and making a final verification decision.
-    Could be powered by an LLM (like Llama, GPT, or other) or a rule-based engine.
+    Potentially an LLM with instructions on how to respond if more data is needed.
     """
     def __init__(self):
-        load_dotenv('.env')  # Load variables from .env
-
-        self.client = Groq(
-            api_key=os.environ.get("GROQ_API_KEY"),
-        )
+        load_dotenv('secret.env')  # Load variables from .env
+        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
     def make_final_decision(
         self, 
@@ -97,34 +66,43 @@ class DecisionAgent:
         osint_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Aggregates all sub-agent results and generates a final decision.
-
-        Args:
-            parsed_data (Dict[str, Any]): The structured data from the ID.
-            face_similarity (float): The face similarity score from FaceVerificationAgent.
-            osint_data (Dict[str, Any]): The OSINT findings.
-
-        Returns:
-            Dict[str, Any]: Final decision output, including a confidence score and reasoning.
-                {
-                    "verificationScore": 0.95,
-                    "status": "LIKELY_VALID",
-                    "reasoning": "Face match is 85%. OSINT data consistent."
-                }
+        Aggregates sub-agent results and returns a JSON with:
+          - REASONING
+          - ACTION: "REQUEST_MORE_DATA" | "FINAL_VALID" | "FINAL_INVALID"
+          - REQUEST_QUERY (if more data needed)
+          - CONFIDENCE_LEVEL
         """
-        # Example logic:
-        #  - If face_similarity < 0.7 => High suspicion
-        #  - If OSINT confidence < 0.5 => Uncertain
-        #  - Additional checks on dateOfBirth vs. OSINT age
-        #  - If no contradictions => likely valid
-
         content = f"""
         ID Data: {id_data}
         Face Similarity: {face_similarity}
         OSINT Data: {osint_data}
+
+        Now follow the instructions:
+        {system_prompt}
         """
-        content += system_prompt
-        return run_groq(content, llama_model, self.client)
+
+        chat_completion = create_chat_completion(content, llama_model, self.client)
+        response_text = chat_completion.choices[0].message.content.strip()
+        print("Raw DecisionAgent response:\n", response_text)
+
+        # Clean the response text by removing markdown code block markers
+        cleaned_response = response_text.replace("```json", "").replace("```", "").strip()
+
+        # Attempt to parse the JSON
+        try:
+            decision_output = json.loads(cleaned_response)
+            print("decision_output_parsed")
+        except json.JSONDecodeError as e:
+            # Fallback: if parsing fails, we can default to an uncertain answer
+            print(f"JSON parsing error: {e}")
+            decision_output = {
+                "REASONING": "Could not parse LLM output; defaulting to invalid or uncertain.",
+                "ACTION": "FINAL_INVALID",
+                "REQUEST_QUERY": "",
+                "CONFIDENCE_LEVEL": "low",
+            }
+            print("decision_output parse failed")
+        return decision_output
     
 
 if __name__ == "__main__":
