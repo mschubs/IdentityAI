@@ -54,12 +54,21 @@ class OSINTAgent:
         self.key_pass = os.getenv('ENDATO_KEY_PASS')
         pass
 
-    def run_fastpeople(self, payload: Dict[str, Any]) -> str:
+    def run_fastpeople(self, args: Dict[str, Any]) -> str:
         # sample_payload = {
         #     "FirstName": "Nandan",
         #     "MiddleName": "M",
         #     "LastName": "Srikrishna",
         # }
+        payload = {
+            "FirstName": args["firstName"],
+            "LastName": args["lastName"],
+            "Addresses": [
+                {
+                    "AddressLine2": args["address2"],
+                }
+            ],
+        }
 
         payload['FilterOptions'] = [
             "IncludeEmptyFirstNameResults",

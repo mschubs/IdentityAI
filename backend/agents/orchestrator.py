@@ -1,10 +1,25 @@
 from document_agent import DocumentParsingAgent
 from reverse_image_agent import ReverseImageAgent
 from osint_agent import OSINTAgent 
+from face_verification_agent import FaceVerificationAgent
+from decision_agent import DecisionAgent
+from typing import Any, Dict
+import json
 
 # ---------------------------------------------------------
 # 5. Orchestrator Agent
 # ---------------------------------------------------------
+
+def split_name(full_name):
+    parts = full_name.strip().split()
+    
+    if len(parts) == 1:  # Only first name
+        return parts[0], "", ""
+    elif len(parts) == 2:  # First and last name
+        return parts[0], "", parts[1]
+    else:  # First, middle, last name (or more)
+        return parts[0], " ".join(parts[1:-1]), parts[-1]
+    
 class OrchestratorAgent:
     """
     The Orchestrator (Controller) Agent coordinates the entire verification pipeline.
@@ -52,11 +67,13 @@ class OrchestratorAgent:
         # 1. Parse the ID
         parsed_data = self.document_parser.parse_id_document(id_image)
         name = parsed_data["name"]
-        address1 = parsed_data["address1"]
-        address2 = parsed_data["address2"]
+        address1 = parsed_data["address-line-1"]
+        address2 = parsed_data["address-line-2"]
         dateOfBirth = parsed_data["dateOfBirth"]
-        idFaceImage_path = parsed_data["idFaceImage"]
-        realFace_path = parsed_data["realFace"]
+        idFaceImage_path = parsed_data["capturedImage"]
+        realFace_path = parsed_data["profileImage"]
+
+        firstName, middleName, lastName = split_name(name)
 
         # 2. Face Verification
         face_similarity = self.face_verifier.compare_faces(idFaceImage_path, realFace_path)
@@ -64,13 +81,14 @@ class OrchestratorAgent:
         # 3. Reverse Image Search
         website_data = self.reverse_image_agent.do_reverse_search(realFace_path)
 
-        # 3. OSINT Checks (using either the ID face or the selfie)
+        # 4. OSINT Checks (using either the ID face or the selfie)
         #    Typically you might pass the best quality face image available.
         fast_people_results = self.osint_agent.run_fastpeople({
             {
-                "FirstName": "Nandan",
-                "MiddleName": "M",
-                "LastName": "Srikrishna",
+                "FirstName": firstName,
+                "MiddleName": middleName,
+                "LastName": lastName,
+                "address2": address2,
             }
         })
 
