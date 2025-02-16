@@ -94,6 +94,7 @@ class OrchestratorAgent:
         Runs the entire identity verification pipeline asynchronously, using multiple OSINT tools
         in a single pass, then makes a final decision.
         """
+        json_result = {}
         print("urls: ", self.license_image_url, self.face_image_url)
         
         # Step 1: Parse ID
@@ -108,6 +109,10 @@ class OrchestratorAgent:
         address1 = observed_data["address-line-1"]
         address2 = observed_data["address-line-2"]
         dateOfBirth = observed_data["dateOfBirth"]
+        
+        json_result["observed"] = observed_data
+        json_result["IRL_image"] = self.face_image_url
+        
         print("running reverse image agent")
         self.reverse_image_agent_output = await asyncio.to_thread(
             self.reverse_image_agent.run,
@@ -116,6 +121,11 @@ class OrchestratorAgent:
         )
         print("running reverse image agent done")
         
+        self.reverse_image_agent_output, urls = self.reverse_image_agent_output
+        json_result["web_links"] = [{"url": url} for url in urls]
+        
+        json_result["bio"] = self.reverse_image_agent_output["bio"]
+                
         # Add age calculation via LLM
         age_prompt = f"""Given today's date and a date of birth, calculate the person's current age.
         Date of Birth: {dateOfBirth}
@@ -141,19 +151,13 @@ class OrchestratorAgent:
         firstName, middleName, lastName = split_name(name)
 
         # Step 2: Face Verification
-        face_verification_future = asyncio.to_thread(
-            self.face_verifier.compare_faces, 
-            cropped_ID_image_path, 
-            cropped_face_image_path
-        )
-
-        # Copy the cropped images to a known location for the dashboard
-        shutil.copy(cropped_ID_image_path, f"dashboard/public/{os.path.basename(cropped_ID_image_path)}")
-        shutil.copy(cropped_face_image_path, f"dashboard/public/{os.path.basename(cropped_face_image_path)}")
-        print("Copied images to dashboard/public:", cropped_ID_image_path, cropped_face_image_path)
+        # face_verification_future = asyncio.to_thread(
+        #     self.face_verifier.compare_faces, 
+        #     cropped_ID_image_path, 
+        #     cropped_face_image_path
+        # )
 
         # Step 3: OSINT calls
-        # Run FastPeople and Sonar queries in parallel
         fast_people_future = asyncio.to_thread(
             self.osint_agent.run_fastpeople,
             {
@@ -163,7 +167,7 @@ class OrchestratorAgent:
                 "address2": address2,
             }
         )
-
+            
         sonar_query = f"Verify name '{name}' and date of birth '{dateOfBirth}' using public records"
         sonar_future = asyncio.to_thread(
             self.osint_agent.run_sonar_query,
@@ -171,8 +175,8 @@ class OrchestratorAgent:
         )
 
         # Gather all async results in parallel
-        self.face_similarity, fast_people_result, sonar_result = await asyncio.gather(
-            face_verification_future, 
+        fast_people_result, sonar_result = await asyncio.gather(
+            # face_verification_future, 
             fast_people_future,
             sonar_future
         )
@@ -181,10 +185,12 @@ class OrchestratorAgent:
         if hasattr(self, 'reverse_image_future') and not self.reverse_image_agent_output:
             await self.reverse_image_future
 
-        # Consolidate OSINT data
+        # Parse the JSON string into a dictionary
         try:
             fast_people_json = json.loads(fast_people_result)
-        except:
+            json_result["online"] = fast_people_json.get("persons", [])
+        except json.JSONDecodeError:
+            json_result["online"] = []
             fast_people_json = {"rawResponse": fast_people_result}
 
         osint_data = {
@@ -205,21 +211,15 @@ class OrchestratorAgent:
             "sonar": sonar_result,
             "reverseImage": self.reverse_image_agent_output or {}
         }
-
-        # Step 4: Make final decision with all available data
-        final_result = self.decision_agent.make_final_decision(
-            id_data=observed_data,
-            face_similarity=self.face_similarity,
-            osint_data=osint_data
-        )
+        
 
         # Step 5: Persist results
-        with open("results.json", "w") as f:
-            json.dump(final_result, f, indent=2)
+        with open("dashboard/src/data.json", "w") as f:
+            json.dump({"allData": [json_result]}, f, indent=2)
 
         # Step 6: Reset everything to accept the next user
         self.reset()
-        return final_result
+        return
 
 
 # ------------------

@@ -330,7 +330,7 @@ class ReverseImageAgent:
         # result = run_groq(content, "mixtral-8x7b-32768", self.client)
         chat_completion = self.client.messages.create(
                 temperature=0,
-                system=f'You will be passed data in the form of a list of webpages in markdown format. If the webpages contain information about {id_name}, please return this name and any information abou them on these webpages in a json format. If the websites do not mention{id_name}, please return an empty json object. Denote the json object to start with `json` and end with ````',
+                system=f'You will be passed data in the form of a list of webpages in markdown format. If the webpages contain information about {id_name}, please return this name and any information about them on these webpages in a json format. If the websites do not mention{id_name}, please return an empty json object. Format the json so that it has a `name` field and `bio` field. The bio must have a length of two sentences or less.Denote the json object to start with `json` and end with ````',
             messages=[
                 {
                     "role": "user",
@@ -411,7 +411,7 @@ class ReverseImageAgent:
             json.dump(urls, f, indent=4)
 
         print(result)
-        return result
+        return result, urls
 # from my_pimeyes_scraper import PimeyesScraper
 
 def do_reverse_search(image_path, id_name):

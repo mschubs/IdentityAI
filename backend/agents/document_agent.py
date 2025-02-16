@@ -114,11 +114,13 @@ class DocumentParsingAgent:
             base_name = image_path.split('/')[-1]
             # write face
             cropped_IRL_image_path = "uploads-modified/cropped_IRL_" + base_name
-            cv2.imwrite(cropped_IRL_image_path, cropped_faces_face)
+            bullshit_cropped_irl_image_path = "dashboard/public/" + cropped_IRL_image_path
+            cv2.imwrite(bullshit_cropped_irl_image_path, cropped_faces_face)
 
             # write license pic
             cropped_ID_image_path = "uploads-modified/cropped_ID_" + base_name
-            cv2.imwrite(cropped_ID_image_path, cropped_faces_id)
+            bullshit_cropped_id_image_path = "dashboard/public/" + cropped_ID_image_path
+            cv2.imwrite(bullshit_cropped_id_image_path, cropped_faces_id)
 
         # Use id_card_image if available, otherwise use original image
         image_to_encode = image_path
@@ -184,5 +186,5 @@ class DocumentParsingAgent:
         result_dict = json.loads(result)
         # result_dict['observed']['profileImage'] = cropped_IRL_image_path if cropped_IRL_image_path else ""
         result_dict['observed']['profileImage'] = cropped_ID_image_path if cropped_ID_image_path else ""
-        result_dict['observed']['faceImage'] = cropped_ID_image_path if cropped_ID_image_path else ""
+        result_dict['observed']['faceImage'] = cropped_IRL_image_path if cropped_IRL_image_path else ""
         return json.dumps(result_dict, indent=2)

@@ -25,11 +25,14 @@ def compare_faces(known_image_path, unknown_image_path):
     print(unknown_image_path)
     try:
         # Convert relative web paths to absolute file system paths
-        base_path = os.path.join(os.getcwd(), "public")  # Assuming images are in public folder
+        base_path = os.path.join(os.getcwd(), "dashboard/public/")  # Assuming images are in public folder
         
         # Remove leading slash and convert to system path
         known_image_path = os.path.join(base_path, known_image_path.lstrip('/'))
         unknown_image_path = os.path.join(base_path, unknown_image_path.lstrip('/'))
+        
+        print("known_image_path: ", known_image_path)
+        print("unknown_image_path: ", unknown_image_path)
         
         # Load and compare images
         known_image = face_recognition.load_image_file(known_image_path)
