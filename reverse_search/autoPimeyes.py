@@ -40,7 +40,7 @@ client = Groq(
     api_key=os.environ.get("GROQ_API_KEY"),
 )
 
-with open('cookies.json', 'r') as f:
+with open('reverse_search/cookies.json', 'r') as f:
     cookies = json.load(f)
 
 pimeyes_url = "https://pimeyes.com/en"
@@ -60,111 +60,137 @@ def open_chrome_with_profile():
     return driver
 
 def upload(path, driver):    
-    results = None
-    currenturl = None 
-
     try:
-
-        # upload_button = WebDriverWait(driver, 20).until(
-        #     EC.element_to_be_clickable((By.XPATH, '//button[@class="upload" and @aria-label="Upload photo"]'))
-        # )
-
+        # Wait for upload button
         upload_button = WebDriverWait(driver, 20).until(
             EC.element_to_be_clickable((By.XPATH, '//*[@id="hero-section"]/div/div[1]/div/div/div[1]/button[2]'))
         )
-
         upload_button.click()
-
+        
+        # Wait for file input and send file
         file_input = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type=file]'))
         )
-
+        
         time.sleep(random.uniform(1, 3))
-
         file_input.send_keys(path)
-        time.sleep(random.uniform(5, 7))
+        time.sleep(random.uniform(4, 5))
+
+        # Wait for file to be processed - look for loading step to disappear
+        WebDriverWait(driver, 20).until(
+            EC.invisibility_of_element_located((By.CSS_SELECTOR, '.step.image-processing'))
+        )
         print("uploaded file")
 
-        # Use more resilient selectors that target specific elements rather than full paths
-        # Find all checkboxes in the permissions div
+        # # Wait for checkboxes to be present and clickable
         # checkboxes = WebDriverWait(driver, 15).until(
         #     EC.presence_of_all_elements_located((By.CSS_SELECTOR, 'div.permissions input[type=checkbox]'))
         # )
-        # print(checkboxes)
 
-        # # Click each checkbox
         # for checkbox in checkboxes:
-        #     WebDriverWait(driver, 15).until(EC.element_to_be_clickable(checkbox)).click()
-        #     time.sleep(0.5) # Small delay between clicks
+        #     WebDriverWait(driver, 15).until(EC.element_to_be_clickable(checkbox))
+        #     checkbox.click()
+        #     # Wait for checkbox state to change
+        #     WebDriverWait(driver, 5).until(
+        #         lambda driver: checkbox.is_selected()
+        #     )
         #     print("Clicked checkbox")
 
-        # Click the submit button
+        # Wait for submit button
         print("finding submit button")
+        time.sleep(random.uniform(0.2, 1))
         submit_buttons = WebDriverWait(driver, 15).until(
             EC.presence_of_all_elements_located((By.CSS_SELECTOR, "button[data-v-f20a56d6]"))
         )
-        submit_button = submit_buttons[3]  # Use the third button found
+        submit_button = submit_buttons[3]
+        time.sleep(random.uniform(0.2, 1))
+        # Wait for button to be clickable
+        WebDriverWait(driver, 15).until(
+            EC.element_to_be_clickable(submit_button)
+        )
+        # time.sleep(random.uniform(1, 2))
         driver.execute_script("arguments[0].click();", submit_button)
         print("clicked submit button")
-
-        time.sleep(5)
+        time.sleep(random.uniform(2, 2.5))
+        # Wait for URL to change
+        WebDriverWait(driver, 20).until(
+            lambda driver: driver.current_url != pimeyes_url
+        )
         return driver.current_url
-        # results_url = "https://pimeyes.com/en/results/Jaw_25021534265fta2c3yq4y9f0f54a2?query=ffc0803e1f3ee0c000001981fdffe3db"
-        # driver.get(results_url)
 
     except Exception as e:
         print(f"An exception occurred: {e}")
 
 def get_results(url, driver):
+    print(f"Starting get_results with URL: {url}")
     driver.get(url)
-    time.sleep(2)
-    
-    # Wait for images to be present
+    time.sleep(random.uniform(1, 2))
+    # Wait for images and loading to complete
+    print("Waiting for images to load...")
     images = WebDriverWait(driver, 15).until(
         EC.presence_of_all_elements_located((By.CSS_SELECTOR, "img[data-v-d11d31e3]"))
     )
+    print(f"Found {len(images)} images")
     
     results = []
-    # Click each image
     try:
-        for image in images:
-            # Wait for loading element to disappear
+        for i, image in enumerate(images, 1):
+            print(f"\nProcessing image {i}/{len(images)}")
+            # Wait for any loading indicators to disappear
+            print("Waiting for loading indicators to disappear...")
             WebDriverWait(driver, 10).until(
                 EC.invisibility_of_element_located((By.CSS_SELECTOR, "p[data-v-1825a511]"))
             )
-            
-            # Scroll element into view
+            time.sleep(random.uniform(0.2, 1))
+            # Scroll and wait for image to be in viewport
+            print("Scrolling image into view...")
             driver.execute_script("arguments[0].scrollIntoView(true);", image)
-            
+
+            print("Clicking on image...")
             driver.execute_script("arguments[0].click();", image)
             
-            # Wait for and click the "Open website" button
             try:
+                # Wait for and click the "Open website" button
+                print("Looking for 'Open website' button...")
+                time.sleep(random.uniform(0.2, 1))
                 open_website_button = WebDriverWait(driver, .5).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, "div.action-item:has(svg use[href='#icon-result-actions-open-website'])"))
                 )
+                print("Clicking 'Open website' button...")
                 open_website_button.click()
+                
+                # Wait for new window
+                print("Waiting for new window...")
+                WebDriverWait(driver, 5).until(
+                    lambda driver: len(driver.window_handles) > 1
+                )
                 driver.switch_to.window(driver.window_handles[-1])
-                results.append(driver.current_url)
+                current_url = driver.current_url
+                print(f"Got URL: {current_url}")
+                results.append(current_url)
                 driver.close()
                 driver.switch_to.window(driver.window_handles[0])
-                # Find and click the close button
-                # Click on the left side of the screen to close the modal
-                # driver.find_element(By.CSS_SELECTOR, "div[data-v-5b790c50].mask").click()
-                from selenium.webdriver.common.keys import Keys
-                ActionChains(driver).move_to_element(driver.find_element("tag name", "body")).move_by_offset(-300, 0).click().perform()
-                # ActionChains(driver).send_keys(Keys.ESCAPE).perform()
 
-                print("clicked screen")
-                time.sleep(1)
+                # Click to close modal and wait for it to disappear
+                print("Closing modal...")
+                actions = ActionChains(driver)
+                actions.move_to_element(driver.find_element("tag name", "body")).move_by_offset(-300, 0).click().perform()
+                time.sleep(random.uniform(0.2, 1))
+                # Wait for modal to close
+                WebDriverWait(driver, 5).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, "div[data-v-5b790c50].mask"))
+                )
+                print("Modal closed successfully")
 
-            except:
-                pass
+            except Exception as e:
+                print(f"Error processing website button: {e}")
+                continue
 
     except Exception as e:
         print(f"Error clicking image: {e}", flush=True)
 
     finally:
+        print(f"Finished processing. Found {len(results)} results")
         if driver:
             driver.quit()
     return results
@@ -190,7 +216,7 @@ def scrape_urls(urls):
 
 def main():
     # path = input("Enter path to the image: ")
-    path = "/Users/alexs/Documents/nandan_id.jpeg"
+    path = "/Users/derekmiller/Documents/sideproj/IdentityAI/reverse_search/IMG_9276.jpg"
 
     # Get the directory of the current script 
     driver = open_chrome_with_profile()
@@ -205,8 +231,8 @@ def main():
         
     driver.refresh()
 
-    results_url = upload(path, driver)
-    # results_url = "https://pimeyes.com/en/results/Jaw_25021534265fta2c3yq4y9f0f54a2?query=ffc0803e1f3ee0c000001981fdffe3db"
+    # results_url = upload(path, driver)
+    results_url = "https://pimeyes.com/en/results/Jaw_25021534265fta2c3yq4y9f0f54a2?query=ffc0803e1f3ee0c000001981fdffe3db"
     urls = get_results(results_url, driver)
     webpage_data = scrape_urls(urls)
 
