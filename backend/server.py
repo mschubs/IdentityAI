@@ -2,12 +2,18 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from backend.similarity import compare_faces
+from similarity import compare_faces
 import shutil
 import os
 from datetime import datetime
 
-
+from agents.orchestrator import OrchestratorAgent
+from agents.document_agent import DocumentParsingAgent
+from agents.face_verification_agent import FaceVerificationAgent
+from agents.osint_agent import OSINTAgent
+from agents.decision_agent import DecisionAgent
+from agents.orchestrator import OrchestratorStatus
+from agents.reverse_image_agent import ReverseImageAgent
 app = FastAPI()
 
 # Add CORS middleware - allow all origins for now (not recommended for production)
@@ -26,6 +32,20 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 class FaceCompareRequest(BaseModel):
     known_image: str
     unknown_image: str
+
+doc_parser = DocumentParsingAgent()
+face_verifier = FaceVerificationAgent()
+osint_agent = OSINTAgent()
+decision_agent = DecisionAgent()
+reverse_image_agent = ReverseImageAgent()
+# Create the orchestrator
+orchestrator = OrchestratorAgent(
+    document_parser=doc_parser,
+    face_verifier=face_verifier,
+    osint_agent=osint_agent,
+    decision_agent=decision_agent,
+    reverse_image_agent=reverse_image_agent
+)
 
 @app.post("/compare-faces")
 async def compare_face_images(request: FaceCompareRequest):
@@ -50,6 +70,21 @@ async def upload_image(file: UploadFile = File(...)):
     # Save the uploaded file
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+        
+    print("awaiting orchestrator")
+    # Pass image to orchestrator (async call)
+    await orchestrator.accept_image(file_path)
+    print("orchestrator done")
+    # Optionally, if the orchestrator just finished RUN_VERIFICATION,
+    # you might want to return something about the results. For example:
+    if orchestrator.status == OrchestratorStatus.PROCESSING:
+        # We may have a "final_result" if run_verification is done.
+        # But if you want to respond right away (non-blocking), you could do so.
+        print(f"Orchestrator state: {orchestrator.status.value}")
+        return {"status": "Verification started, results will come later"}
+    else:
+        print(f"Orchestrator state: {orchestrator.status.value}")
+        return {"status": f"Orchestrator state: {orchestrator.status.value}"}
     
     # Pass image to id to text, and gets this out
     # "observed": {
@@ -71,8 +106,11 @@ async def upload_image(file: UploadFile = File(...)):
     # 
     
     # agent time!
-    
-    return {"filename": new_filename, "message": "Image uploaded successfully"}
+
+@app.post("/reset")
+async def reset():
+    orchestrator.reset()
+    return {"status": "Orchestrator reset"}
 
 if __name__ == "__main__":
     import uvicorn

@@ -35,7 +35,7 @@ class ReverseImageAgent:
         )
 
         # Read cookies from local JSON
-        with open('backend/agents/cookies.json', 'r') as f:
+        with open('/Users/derekmiller/Documents/sideproj/IdentityAI/backend/agents/reverse_image_agent_helpers/cookies.json', 'r') as f:
             self.cookies = json.load(f)
 
         # Pimeyes constants

@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 import cv2
 import json
-from face_detection import detect_primary_faces
+from backend.agents.document_agent_helpers.face_detection import detect_primary_faces_yolo
 
 # Load environment variables
 load_dotenv('secret.env')
@@ -83,7 +83,7 @@ stateIDFormats = {
 
 def process_id_image(image_path):
     # Process face detection first
-    _, _, cropped_faces, id_card_image = detect_primary_faces(image_path)
+    _, _, cropped_faces, id_card_image = detect_primary_faces_yolo(image_path)
     
     # Save cropped face if detected
     cropped_IRL_image_path = None

@@ -40,7 +40,6 @@ app = FirecrawlApp(api_key="fc-28cce56afd4c4218852a6a700a2099d4")
 
 load_dotenv('.env')  # Load variables from .env
 
-
 # ---------------------------------------------------------
 # 3. OSINT Agent (Stub)
 # ---------------------------------------------------------
@@ -52,7 +51,6 @@ class OSINTAgent:
     def __init__(self):
         self.key_name = os.getenv('ENDATO_KEY_NAME')
         self.key_pass = os.getenv('ENDATO_KEY_PASS')
-        pass
 
     def run_fastpeople(self, args: Dict[str, Any]) -> str:
         # sample_payload = {
@@ -61,8 +59,8 @@ class OSINTAgent:
         #     "LastName": "Srikrishna",
         # }
         payload = {
-            "FirstName": args["firstName"],
-            "LastName": args["lastName"],
+            "FirstName": args["FirstName"],
+            "LastName": args["LastName"],
             "Addresses": [
                 {
                     "AddressLine2": args["address2"],
