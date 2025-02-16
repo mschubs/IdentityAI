@@ -3,6 +3,6 @@
 /ID_Images*
 /__pycache__*
 uploads/
-reverse_search/profile/
+*profile*
 backend/agents/reverse_image_agent_helpers/profile
 .env
