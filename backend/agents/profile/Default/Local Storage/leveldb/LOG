@@ -1,0 +1,6 @@
+2025/02/16-05:31:09.606 3a03 Reusing MANIFEST /Users/alexs/Documents/treehacks2025/backend/agents/profile/Default/Local Storage/leveldb/MANIFEST-000001
+2025/02/16-05:31:09.609 3a03 Recovering log #19
+2025/02/16-05:31:09.610 3a03 Reusing old log /Users/alexs/Documents/treehacks2025/backend/agents/profile/Default/Local Storage/leveldb/000019.log 
+2025/02/16-05:31:57.645 3d07 Level-0 table #24: started
+2025/02/16-05:31:57.648 3d07 Level-0 table #24: 11465 bytes OK
+2025/02/16-05:31:57.654 3d07 Delete type=0 #19

@@ -5,6 +5,7 @@ import json
 import re
 import concurrent.futures
 
+from anthropic import Anthropic
 import undetected_chromedriver as uc
 from openpyxl import load_workbook
 from selenium.webdriver.common.action_chains import ActionChains
@@ -18,7 +19,49 @@ from groq import Groq
 from firecrawl import FirecrawlApp
 
 # Load environment variables
-load_dotenv()
+load_dotenv('secret.env')
+
+def create_chat_completion(content, model, client):  # New function to create chat completion
+    return client.chat.completions.create(
+        messages=[
+            {
+                "role": "user",
+                "content": content,
+            }
+        ],
+        model=model,
+    )
+
+def extract_json(text):  # Find content between json and markers
+    start_marker = "json"
+    end_marker = "```"
+    
+    try:
+        # Find the start of JSON content
+        start_index = text.find(start_marker) + len(start_marker)
+        
+        # Find the end of JSON content
+        end_index = text.find(end_marker, start_index)
+        
+        if start_index == -1 or end_index == -1:
+            raise ValueError("JSON markers not found in text")
+            
+        # Extract the JSON string
+        json_str = text[start_index:end_index].strip()
+        
+        # Parse the JSON string
+        return json.loads(json_str)
+        
+    except Exception as e:
+        print(f"Error extracting JSON: {e}")
+        return None
+
+def run_groq(content, model, client):
+    chat_completion = create_chat_completion(content, model, client)
+    response_content = chat_completion.choices[0].message.content
+    print(response_content)
+    json_data = extract_json(response_content)
+    return json_data
 
 class ReverseImageAgent:
     def __init__(self):
@@ -30,9 +73,10 @@ class ReverseImageAgent:
         self.app = FirecrawlApp(api_key="fc-28cce56afd4c4218852a6a700a2099d4")
         
         # Groq client
-        self.client = Groq(
-            api_key=os.environ.get("GROQ_API_KEY"),
-        )
+        # self.client = Groq(
+        #     api_key=os.environ.get("GROQ_API_KEY"),
+        # )
+        self.client = Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
         # Read cookies from local JSON
         with open('backend/agents/cookies.json', 'r') as f:
@@ -264,25 +308,67 @@ class ReverseImageAgent:
                 continue
 
         return results
-
+    
     def scrape_urls(self, urls):
-        """
-        Use Firecrawl's scrape API to scrape each URL asynchronously.
-        """
-        def scrape_single_url(url):
-            try:
-                print("scraping url: ", url)
-                return self.app.scrape_url(
-                    url,
-                    params={'formats': ['markdown']}
-                )
-            except Exception as e:
-                print(f"Error scraping url: {e}", flush=True)
-                return None
+        futures = []
+        markdown = []
+        time_start = time.time()
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-            ret = list(executor.map(scrape_single_url, urls))
-        return ret
+        time_start = time.time()
+        urls_to_scrape = urls[:5]
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            futures = [executor.submit(self.scrape_url, url) for url in urls_to_scrape]
+            for future in concurrent.futures.as_completed(futures):
+                markdown.append(future.result())
+        time_end = time.time()
+        print(f"Time to scrape all urls: {time_end - time_start} seconds")
+
+        time_start = time.time()
+        # content = """
+        #         You will be passed data in the form of a list of webpages in markdown format. If the webpages contain information about Nandan Srikrishna, please return this name and any information abou them on these webpages in a json format. If the websites do not mention Nandan Srikrishna, please return an empty json object. Denote the json object to start with `json` and end with ````"""
+        # content += str(markdown)
+        # result = run_groq(content, "mixtral-8x7b-32768", self.client)
+        chat_completion = self.client.messages.create(
+                temperature=0,
+                system="""
+                You will be passed data in the form of a list of webpages in markdown format. If the webpages contain information about Nandan Srikrishna, please return this name and any information abou them on these webpages in a json format. If the websites do not mention Nandan Srikrishna, please return an empty json object. Denote the json object to start with `json` and end with ````""",
+            messages=[
+                {
+                    "role": "user",
+                    "content": str(markdown)
+                }
+            ],
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=500
+        )
+
+        result = chat_completion.content[0].text
+        print(result)
+
+        time_end = time.time()
+        print(f"Time for claude inference: {time_end - time_start} seconds")
+        return urls_to_scrape, extract_json(result)
+
+
+        # with concurrent.futures.ThreadPoolExecutor() as executor:
+        #     futures = [executor.submit(self.scrape_url, url) for url in urls]
+        # for future in futures:
+        #     result = future.result()
+            
+        # print(f"Time to scrape all urls: {time_end - time_start} seconds")
+        # return webpage_data
+
+    
+    def scrape_url(self, url):
+        try:
+            print("scraping url: ", url)
+            return self.app.scrape_url(
+                url,
+                params={'formats': ['markdown']}
+            )
+        except Exception as e:
+            print(f"Error scraping url: {e}", flush=True)
+            return None
 
     def run(self, image_path):
         """
@@ -293,6 +379,9 @@ class ReverseImageAgent:
         4) Scrape URLs. 
         5) Print or return data.
         """
+        self.webpage_data = {}
+        self.futures = []
+
         self.driver.get(self.pimeyes_url)
 
         # Add cookies
@@ -311,12 +400,14 @@ class ReverseImageAgent:
         results_url = "https://pimeyes.com/en/results/Jaw_25021534265fta2c3yq4y9f0f54a2?query=ffc0803e1f3ee0c000001981fdffe3db"
 
         # Get final URL set
+        time_start = time.time()
         urls = self.get_results(results_url)
+        time_end = time.time()
+        print(f"Time to get pimeyes url results: {time_end - time_start} seconds")
 
-        # Scrape them
-        webpage_data = self.scrape_urls(urls)
-        return webpage_data
-
+        urls, result = self.scrape_urls(urls)
+        print(result)
+        return result
 # from my_pimeyes_scraper import PimeyesScraper
 
 def do_reverse_search(image_path):
@@ -327,5 +418,5 @@ def do_reverse_search(image_path):
 
 if __name__ == "__main__":
     # Example call
-    results = do_reverse_search("/Users/derekmiller/Documents/sideproj/IdentityAI/backend/agents/IMG_9276.jpg")
+    results = do_reverse_search("/Users/alexs/Documents/treehacks2025/backend/agents/nandan_face.jpg")
     print(results)
