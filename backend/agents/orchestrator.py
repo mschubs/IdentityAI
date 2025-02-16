@@ -161,6 +161,7 @@ class OrchestratorAgent:
         # We'll store consolidated OSINT data in a dictionary. Let's start with fast_people_results:
         # (some APIs return string JSON, so parse if necessary)
         try:
+            # TODO: append the results of reverse_image_agent_output to osint_data
             osint_data = json.loads(self.fast_people_results)
         except:
             osint_data = {"fastPeople": self.fast_people_results}
