@@ -60,9 +60,15 @@ class OSINTAgent:
         #     "MiddleName": "M",
         #     "LastName": "Srikrishna",
         # }
+        first_name = args.get("FirstName") or args.get("firstName")
+        last_name = args.get("LastName") or args.get("lastName")
+        
+        if not first_name or not last_name:
+            raise ValueError("Missing required name fields")
+
         payload = {
-            "FirstName": args["FirstName"],
-            "LastName": args["LastName"],
+            "FirstName": first_name,
+            "LastName": last_name,
             "Addresses": [
                 {
                     "AddressLine2": args.get("address2", ""),
@@ -94,7 +100,30 @@ class OSINTAgent:
         }
         
         response = requests.post(url, headers=headers, json=payload)
-        return response.text
+        data = response.json()
+
+        print("Data:", data)
+
+        # Process the returned JSON to only include fullName, fullAddress, and age.
+        filtered_persons = []
+        for person in data.get("persons", []):
+            full_name = person.get("fullName", "")
+            age = person.get("age", "")
+            
+            # Assuming you want the fullAddress from the first address in the list:
+            full_address = ""
+            addresses = person.get("addresses", [])
+            if addresses:
+                full_address = addresses[0].get("fullAddress", "")
+            
+            filtered_persons.append({
+                "fullName": full_name,
+                "age": age,
+                "fullAddress": full_address
+            })
+
+        # Return the filtered data as JSON
+        return json.dumps({"persons": filtered_persons})
 
     def run_sonar_query(self, query: str) -> Dict[str, Any]:
         """
@@ -131,7 +160,9 @@ class OSINTAgent:
         returns the result of that function.
         """
         groq_prompt = '''
-        You are an assistant tasked with selecting the most appropriate API function based on the user's query. There are two functions available:
+        You are an assistant tasked with selecting the most appropriate API function based on the orchestrator's query.
+        Your goal is to choose the best function and paramters to that would best help the orchestrator.
+        There are two functions available:
         1. **Person Search ("person")**:  
         - Use this function when the query appears to be asking for information about a specific person.  
         - The query may include personal details such as a person's name, and optionally an address.  
@@ -143,6 +174,7 @@ class OSINTAgent:
         2. **Sonar Query ("sonar")**:  
         - Use this function for general queries that do not require person-specific parameters or more vague questions of a person.  
         - In this case, choose an appropriate query for the Sonar API.
+        - Sonar queries can be used for more complex queries that require a more general search.
 
         Return your decision as a JSON object in one of the following formats:
 
@@ -294,7 +326,7 @@ if __name__ == "__main__":
         result = agent.choose_best_function("Who is Nandan Srikrishna?")
         print("Result from choose_best_function:", result)
 
-        result = agent.choose_best_function("Who is Nandan Srikrishna?")
-        print("Result2 from choose_best_function:", result)
+        # result = agent.choose_best_function("Who is Nandan Srikrishna?")
+        # print("Result2 from choose_best_function:", result)
     except Exception as e:
         print(f"Error occurred: {str(e)}")
