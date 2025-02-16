@@ -6,5 +6,7 @@ uploads/
 reverse_search/profile/
 backend/agents/reverse_image_agent_helpers/profile
 .env
+*profile
+.venv
 backend/agents/profile/
 backend/agents/document_agent_helpers/yolov8n-face.pt
