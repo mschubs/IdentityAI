@@ -29,6 +29,8 @@ import time
 import json
 import random
 import undetected_chromedriver as uc
+import re
+
 
 from firecrawl import FirecrawlApp
 
@@ -125,74 +127,177 @@ def get_results(url, driver):
     print(f"Starting get_results with URL: {url}")
     driver.get(url)
     time.sleep(random.uniform(1, 2))
-    # Wait for images and loading to complete
-    print("Waiting for images to load...")
-    images = WebDriverWait(driver, 15).until(
-        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "img[data-v-d11d31e3]"))
+    
+    # Add JavaScript to intercept navigation
+    intercept_script = """
+    window.open = function(url) {
+        document.body.setAttribute('data-last-url', url);
+        return { closed: false };  // Mock window object
+    };
+    """
+    driver.execute_script(intercept_script)
+    
+    # Wait for the main container to appear
+    print("Waiting for container to load...")
+    container = WebDriverWait(driver, 15).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, "div.container.banner-content"))
     )
-    print(f"Found {len(images)} images")
+
+    # Now find all 'row-*' containers that have 'results-row' in their class
+    rows = container.find_elements(By.CSS_SELECTOR, "div[class^='row-'][class*='results-row']")
+    
+    # We will collect all the img elements of interest in this list
+    images = []
+    
+    # Traverse each row
+    for row in rows:
+        # Find each "results-n" block in this row
+        results_divs = row.find_elements(By.CSS_SELECTOR, "div[class^='results-']")
+        
+        for rdiv in results_divs:
+            # Extract the 'n' from "results-n"
+            class_name = rdiv.get_attribute("class")
+            match = re.search(r"results-(\d+)", class_name)
+            if match:
+                n = int(match.group(1))
+            else:
+                n = 1  # Default if for some reason not matched, treat as 1
+
+            # Within the current "results-n" block, we look for child results
+            # Usually something like <div data-v-d11d31e3 ... class="result visible">...
+            child_divs = rdiv.find_elements(By.CSS_SELECTOR, "div[data-v-d11d31e3].result.visible")
+            
+            if not child_divs:
+                continue
+            
+            # If n != 1, we only want the *first* child because duplicates are inside
+            if n != 1:
+                child_divs = [child_divs[0]]
+            
+            # Gather the img[data-v-d11d31e3] from each child
+            for child in child_divs:
+                try:
+                    img = child.find_element(By.CSS_SELECTOR, "img[data-v-d11d31e3]")
+                    images.append(img)
+                except:
+                    # If there's any child that doesn't have the expected <img>, skip it
+                    pass
+
+    print(f"Total extracted images (unique DOM elements): {len(images)}")
     
     results = []
-    try:
-        for i, image in enumerate(images, 1):
-            print(f"\nProcessing image {i}/{len(images)}")
-            # Wait for any loading indicators to disappear
-            print("Waiting for loading indicators to disappear...")
-            WebDriverWait(driver, 10).until(
-                EC.invisibility_of_element_located((By.CSS_SELECTOR, "p[data-v-1825a511]"))
-            )
-            time.sleep(random.uniform(0.2, 1))
-            # Scroll and wait for image to be in viewport
-            print("Scrolling image into view...")
-            driver.execute_script("arguments[0].scrollIntoView(true);", image)
+    
+    # Proceed with your original routine (scroll, click image, open website, etc.)
+    for i, image in enumerate(images, 1):
+        print(f"\nProcessing image {i}/{len(images)}")
+        
+        # Wait for any loading indicators to disappear
+        print("Waiting for loading indicators to disappear...")
+        WebDriverWait(driver, 10).until(
+            EC.invisibility_of_element_located((By.CSS_SELECTOR, "p[data-v-1825a511]"))
+        )
+        
+        # Scroll and wait for the image to be in viewport
+        print("Scrolling image into view...")
+        driver.execute_script("arguments[0].scrollIntoView(true);", image)
+        
+        # Wait for image to be visible and clickable
+        WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable(image)
+        )
+        time.sleep(random.uniform(0.2, 0.3))  # Small delay to ensure image is fully loaded
 
-            print("Clicking on image...")
-            driver.execute_script("arguments[0].click();", image)
-            
+        print("Clicking on image...")
+        driver.execute_script("arguments[0].click();", image)
+        time.sleep(random.uniform(0.1, 0.2))
+
+        # Check if subgrid exists
+        subgrid_images = driver.find_elements(By.CSS_SELECTOR, "div.sub-grid div.result.visible")
+        
+        subgrid_present = bool(subgrid_images)  # Track if subgrid was found
+        print("subgrid_present: ", subgrid_present)
+        if subgrid_present:
+            # First make sure any existing modal/mask is gone
             try:
-                # Wait for and click the "Open website" button
-                print("Looking for 'Open website' button...")
-                time.sleep(random.uniform(0.2, 1))
-                open_website_button = WebDriverWait(driver, .5).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, "div.action-item:has(svg use[href='#icon-result-actions-open-website'])"))
-                )
-                print("Clicking 'Open website' button...")
-                open_website_button.click()
-                
-                # Wait for new window
-                print("Waiting for new window...")
-                WebDriverWait(driver, 5).until(
-                    lambda driver: len(driver.window_handles) > 1
-                )
-                driver.switch_to.window(driver.window_handles[-1])
-                current_url = driver.current_url
-                print(f"Got URL: {current_url}")
-                results.append(current_url)
-                driver.close()
-                driver.switch_to.window(driver.window_handles[0])
-
-                # Click to close modal and wait for it to disappear
-                print("Closing modal...")
-                actions = ActionChains(driver)
-                actions.move_to_element(driver.find_element("tag name", "body")).move_by_offset(-300, 0).click().perform()
-                time.sleep(random.uniform(0.2, 1))
-                # Wait for modal to close
-                WebDriverWait(driver, 5).until(
+                WebDriverWait(driver, 2).until(
                     EC.invisibility_of_element_located((By.CSS_SELECTOR, "div[data-v-5b790c50].mask"))
                 )
-                print("Modal closed successfully")
+            except:
+                # If timeout occurs, try clicking outside to dismiss any modal
+                actions = ActionChains(driver)
+                actions.move_to_element(driver.find_element(By.TAG_NAME, "body")).move_by_offset(-300, 0).click().perform()
+                time.sleep(random.uniform(0.2, 0.3))
 
-            except Exception as e:
-                print(f"Error processing website button: {e}")
-                continue
+            # Now proceed with subgrid interaction
+            print("Sub-grid detected, clicking first sub-grid image...")
+            driver.execute_script("arguments[0].scrollIntoView(true);", subgrid_images[0])
+            time.sleep(random.uniform(0.1, 0.2))
+            
+            # Use JavaScript click instead of regular click
+            driver.execute_script("arguments[0].click();", subgrid_images[0])
 
-    except Exception as e:
-        print(f"Error clicking image: {e}", flush=True)
+        try:
+            # Wait for and click the "Open website" button
+            print("Looking for 'Open website' button...")
+            # time.sleep(random.uniform(0.2, 0.3))  # Small delay before looking
+            
+            # First wait for element to be present
+            open_website_button = WebDriverWait(driver, 2).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "div.action-item:has(svg use[href='#icon-result-actions-open-website'])")
+                )
+            )
+            # Then wait for it to be clickable
+            open_website_button = WebDriverWait(driver, 2).until(
+                EC.element_to_be_clickable(open_website_button)
+            )
+            time.sleep(random.uniform(0.1, 0.2))  # Small delay before clicking
+            
+            print("Clicking 'Open website' button...")
+            open_website_button.click()
+            
+            # Get the intercepted URL
+            current_url = driver.execute_script("return document.body.getAttribute('data-last-url');")
+            print(f"Intercepted URL: {current_url}")
+            results.append(current_url)
+            
+            # Close modal by clicking outside it and wait for it to disappear
+            print("Closing modal...")
+            actions = ActionChains(driver)
+            actions.move_to_element(driver.find_element(By.TAG_NAME, "body")).move_by_offset(-300, 0).click().perform()
+            time.sleep(random.uniform(0.1, 0.2))  # Small delay after clicking
+            
+            WebDriverWait(driver, 5).until(
+                EC.invisibility_of_element_located((By.CSS_SELECTOR, "div[data-v-5b790c50].mask"))
+            )
+            print("Modal closed successfully")
+            time.sleep(random.uniform(0.1, 0.2))
 
-    finally:
-        print(f"Finished processing. Found {len(results)} results")
-        if driver:
-            driver.quit()
+            # Only attempt to close subgrid if it was present
+            if subgrid_present:
+                print("Closing sub-grid after modal is closed...")
+                close_btn = WebDriverWait(driver, 2).until(
+                    EC.element_to_be_clickable(
+                        (By.CSS_SELECTOR, "div.sub-grid div.sub-header button[type='button']")
+                    )
+                )
+                close_btn.click()
+                
+                # Wait for subgrid to disappear
+                WebDriverWait(driver, 5).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, "div.sub-grid"))
+                )
+                
+                driver.execute_script("arguments[0].scrollIntoView(true);", image)
+                time.sleep(random.uniform(0.1, 0.2))
+
+        except Exception as e:
+            print(f"Error processing website button: {str(e)}")
+            # Optionally add more specific error handling
+            if "timeout" in str(e).lower():
+                print("Timeout occurred while waiting for element")
+            continue
+
     return results
 
 def scrape_urls(urls):
