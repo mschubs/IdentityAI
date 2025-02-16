@@ -1,3 +1,4 @@
+from asyncore import loop
 from document_agent import DocumentParsingAgent
 from reverse_image_agent import ReverseImageAgent
 from osint_agent import OSINTAgent 
@@ -5,6 +6,8 @@ from face_verification_agent import FaceVerificationAgent
 from decision_agent import DecisionAgent
 from typing import Any, Dict
 import json
+import asyncio
+import concurrent.futures
 
 # ---------------------------------------------------------
 # 5. Orchestrator Agent
@@ -47,11 +50,11 @@ class OrchestratorAgent:
         self.face_verifier = face_verifier
         self.osint_agent = osint_agent
         self.decision_agent = decision_agent
+        self.reverse_image_agent = reverse_image_agent
 
     def run_verification(
         self,
-        selfie_image: bytes,
-        id_image: bytes
+        uploaded_image: bytes
     ) -> Dict[str, Any]:
         """
         Runs the entire identity verification pipeline.
@@ -65,7 +68,7 @@ class OrchestratorAgent:
             OSINT findings, and final verification decision.
         """
         # 1. Parse the ID
-        parsed_data = self.document_parser.parse_id_document(id_image)
+        parsed_data = self.document_parser.parse_id_document(uploaded_image)
         name = parsed_data["name"]
         address1 = parsed_data["address-line-1"]
         address2 = parsed_data["address-line-2"]
@@ -78,27 +81,26 @@ class OrchestratorAgent:
         # 2. Face Verification
         face_similarity = self.face_verifier.compare_faces(idFaceImage_path, realFace_path)
 
-        website_data_task = loop.run_in_executor(self.executor, self.reverse_image_agent.do_reverse_search, realFace_path)
-        osint_task = loop.run_in_executor(self.executor, self.osint_agent.run_fastpeople, {
-            "FirstName": firstName,
-            "MiddleName": middleName,
-            "LastName": lastName,
-            "address2": address2,
-        })
+        # Create a thread pool executor
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            # Run the tasks concurrently
+            website_data_task = executor.submit(
+                self.reverse_image_agent.do_reverse_search, 
+                realFace_path
+            )
+            osint_task = executor.submit(
+                self.osint_agent.run_fastpeople,
+                {
+                    "FirstName": firstName,
+                    "MiddleName": middleName,
+                    "LastName": lastName,
+                    "address2": address2,
+                }
+            )
 
-        # 3. Reverse Image Search
-        website_data = self.reverse_image_agent.do_reverse_search(realFace_path)
-
-        # 4. OSINT Checks (using either the ID face or the selfie)
-        #    Typically you might pass the best quality face image available.
-        fast_people_results = self.osint_agent.run_fastpeople({
-            {
-                "FirstName": firstName,
-                "MiddleName": middleName,
-                "LastName": lastName,
-                "address2": address2,
-            }
-        })
+            # Wait for both tasks to complete
+            website_data = website_data_task.result()
+            osint_data = osint_task.result()
 
         # 4. Final Decision
         decision_output = self.decision_agent.make_final_decision(
@@ -125,23 +127,21 @@ if __name__ == "__main__":
     face_verifier = FaceVerificationAgent()
     osint_agent = OSINTAgent()
     decision_agent = DecisionAgent()
-
+    reverse_image_agent = ReverseImageAgent()
     # Create the orchestrator
     orchestrator = OrchestratorAgent(
         document_parser=doc_parser,
+        reverse_image_agent=reverse_image_agent,
         face_verifier=face_verifier,
         osint_agent=osint_agent,
         decision_agent=decision_agent
-    )
+    )    
 
-    # Mock image data
-    mock_selfie_data = b"mock_selfie_bytes"
-    mock_id_data = b"mock_id_image_bytes"
+    uploaded_image = "uploaded_image_path.jpg"
 
     # Run the pipeline
     verification_result = orchestrator.run_verification(
-        selfie_image=mock_selfie_data,
-        id_image=mock_id_data
+        uploaded_image=uploaded_image
     )
 
     # Print or log the output
