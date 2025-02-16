@@ -165,7 +165,7 @@ def get_results(url, driver):
 
             # Within the current "results-n" block, we look for child results
             # Usually something like <div data-v-d11d31e3 ... class="result visible">...
-            child_divs = rdiv.find_elements(By.CSS_SELECTOR, "div[data-v-d11d31e3].result.visible")
+            child_divs = rdiv.find_elements(By.CSS_SELECTOR, "div.result.visible")
             
             if not child_divs:
                 continue
@@ -220,7 +220,7 @@ def get_results(url, driver):
             # First make sure any existing modal/mask is gone
             try:
                 WebDriverWait(driver, 2).until(
-                    EC.invisibility_of_element_located((By.CSS_SELECTOR, "div[data-v-5b790c50].mask"))
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, "div.mask"))
                 )
             except:
                 # If timeout occurs, try clicking outside to dismiss any modal
@@ -268,7 +268,7 @@ def get_results(url, driver):
             time.sleep(random.uniform(0.1, 0.2))  # Small delay after clicking
             
             WebDriverWait(driver, 5).until(
-                EC.invisibility_of_element_located((By.CSS_SELECTOR, "div[data-v-5b790c50].mask"))
+                EC.invisibility_of_element_located((By.CSS_SELECTOR, "div.mask"))
             )
             print("Modal closed successfully")
             time.sleep(random.uniform(0.1, 0.2))
@@ -321,7 +321,7 @@ def scrape_urls(urls):
 
 def main():
     # path = input("Enter path to the image: ")
-    path = "/Users/derekmiller/Documents/sideproj/IdentityAI/reverse_search/IMG_9276.jpg"
+    path = "/Users/derekmiller/Documents/sideproj/IdentityAI/reverse_search/IMG_9277.png"
 
     # Get the directory of the current script 
     driver = open_chrome_with_profile()
@@ -336,8 +336,8 @@ def main():
         
     driver.refresh()
 
-    # results_url = upload(path, driver)
-    results_url = "https://pimeyes.com/en/results/Jaw_25021534265fta2c3yq4y9f0f54a2?query=ffc0803e1f3ee0c000001981fdffe3db"
+    results_url = upload(path, driver)
+    # results_url = "https://pimeyes.com/en/results/Jaw_25021534265fta2c3yq4y9f0f54a2?query=ffc0803e1f3ee0c000001981fdffe3db"
     urls = get_results(results_url, driver)
     webpage_data = scrape_urls(urls)
 
