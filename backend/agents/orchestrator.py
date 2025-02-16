@@ -78,6 +78,14 @@ class OrchestratorAgent:
         # 2. Face Verification
         face_similarity = self.face_verifier.compare_faces(idFaceImage_path, realFace_path)
 
+        website_data_task = loop.run_in_executor(self.executor, self.reverse_image_agent.do_reverse_search, realFace_path)
+        osint_task = loop.run_in_executor(self.executor, self.osint_agent.run_fastpeople, {
+            "FirstName": firstName,
+            "MiddleName": middleName,
+            "LastName": lastName,
+            "address2": address2,
+        })
+
         # 3. Reverse Image Search
         website_data = self.reverse_image_agent.do_reverse_search(realFace_path)
 
