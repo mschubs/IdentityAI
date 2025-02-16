@@ -55,8 +55,8 @@ class FaceVerificationAgent:
         print(unknown_image_path)
         try:
             # Convert relative web paths to absolute file system paths.
-            base_path = os.path.join(os.getcwd(), "public")  # Assuming images are in 'public' folder
-
+            # base_path = os.path.join(os.getcwd(), "public")  # Assuming images are in 'public' folder
+            base_path = os.path.join(os.getcwd())
             # Remove leading slash and convert to system path
             known_image_path_full = os.path.join(base_path, known_image_path.lstrip('/'))
             unknown_image_path_full = os.path.join(base_path, unknown_image_path.lstrip('/'))
@@ -76,6 +76,7 @@ class FaceVerificationAgent:
 
             # Compare the first face in each image
             results = self._compare_face_encodings(known_encoding[0], unknown_encoding[0])
+
             return results
 
         except Exception as e:

@@ -1,6 +1,8 @@
 import asyncio
 from typing import Any, Dict, Optional
 from enum import Enum
+import os
+import shutil
 
 from agents.document_agent import DocumentParsingAgent
 from agents.reverse_image_agent import ReverseImageAgent
@@ -50,19 +52,36 @@ class OrchestratorAgent:
         self.face_similarity = None
         self.fast_people_results = None
 
+    async def _cache_reverse_image_result(self):
+        """Background task to cache the reverse image result when ready"""
+        result = await self.reverse_image_future
+        self.reverse_image_agent_output = result
+        with open("reverse_image_agent_output.json", "w") as f:
+            json.dump(result, f)
+    
     async def accept_image(self, image_url: str):
         """
         Accepts an image and decides whether it's the face or the license,
         then triggers the appropriate sub-tasks.
         """
         if self.status == OrchestratorStatus.DORMANT:
-            # Face image
             self.status = OrchestratorStatus.AWAITING_LICENSE
             self.face_image_url = image_url
-            # Launch the reverse-image agent concurrently 
-            # (since we want its result, but we don't have to block on it immediately).
             print("running reverse image agent")
-            self.reverse_image_agent_output = self.reverse_image_agent.run(image_url)
+            
+            # Load from cache if available
+            if os.path.exists("reverse_image_agent_output.json"):
+                with open("reverse_image_agent_output.json", "r") as f:
+                    self.reverse_image_agent_output = json.load(f)
+            else:
+                # Create the future but don't await it
+                self.reverse_image_future = asyncio.create_task(
+                    asyncio.to_thread(self.reverse_image_agent.run, image_url)
+                )
+                
+                # Create a background task to cache the result when it's ready
+                asyncio.create_task(self._cache_reverse_image_result())
+
             
         elif self.status == OrchestratorStatus.AWAITING_LICENSE:
             # License image
@@ -97,25 +116,35 @@ class OrchestratorAgent:
         """
         # 1. Parse the ID
         #    We'll run `parse_id_document` in a thread if it's blocking:
+        print("urls: ", self.license_image_url, self.face_image_url)
         parsed_data = await asyncio.to_thread(
-            self.document_parser.parse_id_document, self.license_image_url
+            self.document_parser.parse_id_document, self.license_image_url, self.face_image_url
         )
         
-        name = parsed_data["name"]
-        address1 = parsed_data["address-line-1"]
-        address2 = parsed_data["address-line-2"]
-        dateOfBirth = parsed_data["dateOfBirth"]
-        id_face_image_path = parsed_data["capturedImage"]
-        real_face_path = parsed_data["profileImage"]
-        
+        if isinstance(parsed_data, str):
+            parsed_data = json.loads(parsed_data)  # Convert JSON string to dictionary if needed
+        observed_data = parsed_data["observed"]
+        name = observed_data["name"]
+        address1 = observed_data["address-line-1"]
+        address2 = observed_data["address-line-2"]
+        dateOfBirth = observed_data["dateOfBirth"]
+        cropped_ID_image_path = observed_data["profileImage"]
+        cropped_face_image_path = observed_data["faceImage"]
+
+        print("cropped_ID_image_path ", cropped_ID_image_path)
         firstName, middleName, lastName = split_name(name)
         
         # 2. Face Verification
         #    This might be CPU-bound or GPU-bound, so run it in a thread:
         face_verification_future = asyncio.to_thread(
-            self.face_verifier.compare_faces, id_face_image_path, real_face_path
+            self.face_verifier.compare_faces, cropped_ID_image_path, cropped_face_image_path
         )
         
+        #copy both images to dashboard/public. Ensure that they use their existing names, but excluding the dirs they are in rn
+        shutil.copy(cropped_ID_image_path, f"dashboard/public/{cropped_ID_image_path.split('/')[-1]}")
+        shutil.copy(cropped_face_image_path, f"dashboard/public/{cropped_face_image_path.split('/')[-1]}")
+        print("copied images to dashboard/public: ", cropped_ID_image_path.split('/')[-1], cropped_face_image_path.split('/')[-1])
+
         # 3. OSINT Checks
         #    Possibly also run in a thread if it does synchronous network calls:
         fast_people_future = asyncio.to_thread(
@@ -162,6 +191,6 @@ class OrchestratorAgent:
         with open("results.json", "w") as f:
             json.dump(final_result, f)
 
-        # Return or store it
+        # Reset and return
         self.reset()
-        return
+        return final_result

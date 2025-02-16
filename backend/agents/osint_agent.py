@@ -59,8 +59,8 @@ class OSINTAgent:
         #     "LastName": "Srikrishna",
         # }
         payload = {
-            "FirstName": args["firstName"],
-            "LastName": args["lastName"],
+            "FirstName": args["FirstName"],
+            "LastName": args["LastName"],
             "Addresses": [
                 {
                     "AddressLine2": args["address2"],
