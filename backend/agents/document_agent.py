@@ -8,7 +8,7 @@ import os
 from dotenv import load_dotenv
 import cv2
 import json
-from document_agent_helpers.face_detection import detect_primary_faces
+from .document_agent_helpers.face_detection import detect_primary_faces
 
 class DocumentParsingAgent:
     """
