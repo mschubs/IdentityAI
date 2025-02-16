@@ -47,6 +47,7 @@ class OrchestratorAgent:
         self.face_verifier = face_verifier
         self.osint_agent = osint_agent
         self.decision_agent = decision_agent
+        
 
     def run_verification(
         self,

@@ -13,7 +13,7 @@ def detect_primary_faces(image_path, upsample=1, model='hog'):
         model (str): Detection model to use - 'hog' or 'cnn'
     
     Returns:
-        tuple: (face_locations, annotated_image, cropped_faces, id_card_image)
+        tuple: (face_locations, annotated_image, cropped_faces)
     """
     # Load and convert the image
     image = face_recognition.load_image_file(image_path)
@@ -28,7 +28,7 @@ def detect_primary_faces(image_path, upsample=1, model='hog'):
     
     # If no faces found, return None
     if not face_locations:
-        return None, image, None, None
+        return None, image, None
     
     # Sort faces by area (largest to smallest)
     sorted_faces = sorted(face_locations, 
@@ -58,28 +58,28 @@ def detect_primary_faces(image_path, upsample=1, model='hog'):
         cv2.rectangle(annotated_image, (padded_left, padded_top), 
                      (padded_right, padded_bottom), (0, 255, 0), 2)
     
-    id_card_image = None
-    # Create additional wide crop of second face if it exists
-    if len(primary_faces) > 1:
-        face = primary_faces[1]
-        top, right, bottom, left = face
-        wide_padding_h = 700  # horizontal padding
-        wide_padding_v = 300  # vertical padding
+    # id_card_image = None
+    # # Create additional wide crop of second face if it exists
+    # if len(primary_faces) > 1:
+    #     face = primary_faces[1]
+    #     top, right, bottom, left = face
+    #     wide_padding_h = 700  # horizontal padding
+    #     wide_padding_v = 300  # vertical padding
         
-        # Add increased padding to the bounding box
-        wide_top = max(0, top - wide_padding_v)
-        wide_right = min(annotated_image.shape[1], right + wide_padding_h)
-        wide_bottom = min(annotated_image.shape[0], bottom + wide_padding_v)
-        wide_left = max(0, left - wide_padding_h)
+    #     # Add increased padding to the bounding box
+    #     wide_top = max(0, top - wide_padding_v)
+    #     wide_right = min(annotated_image.shape[1], right + wide_padding_h)
+    #     wide_bottom = min(annotated_image.shape[0], bottom + wide_padding_v)
+    #     wide_left = max(0, left - wide_padding_h)
         
-        id_card_image = image[wide_top:wide_bottom, wide_left:wide_right]
-        # Save the wide cropped face separately
-        base_name = image_path.split('/')[-1]
-        wide_cropped_path = "wide_cropped_" + base_name
-        cv2.imwrite(wide_cropped_path, cv2.cvtColor(id_card_image, cv2.COLOR_RGB2BGR))
-        print(f"Wide cropped face saved to {wide_cropped_path}")
+    #     id_card_image = image[wide_top:wide_bottom, wide_left:wide_right]
+    #     # Save the wide cropped face separately
+    #     base_name = image_path.split('/')[-1]
+    #     wide_cropped_path = "wide_cropped_" + base_name
+    #     cv2.imwrite(wide_cropped_path, cv2.cvtColor(id_card_image, cv2.COLOR_RGB2BGR))
+    #     print(f"Wide cropped face saved to {wide_cropped_path}")
 
-    return primary_faces, annotated_image, cropped_faces, id_card_image
+    return primary_faces, annotated_image, cropped_faces
 
 if __name__ == "__main__":
     image_path = "ID_Images/Nandan+ID.jpeg"

@@ -22,7 +22,6 @@ class DocumentParsingAgent:
         self.schema = {
             "observed": {
                 "profileImage": str,
-                "capturedImage": str,
                 "name": str,
                 "address-line-1": str,
                 "address-line-2": str,
@@ -102,7 +101,8 @@ class DocumentParsingAgent:
             Dict[str, str]: A dictionary containing ID fields.
         """
         # Process face detection first
-        _, _, cropped_faces, id_card_image = detect_primary_faces(image_path)
+        # _, _, cropped_faces, id_card_image = detect_primary_faces(image_path)
+        _, _, cropped_faces = detect_primary_faces(image_path)
         
         # Save cropped face if detected
         cropped_IRL_image_path = None
@@ -116,12 +116,12 @@ class DocumentParsingAgent:
 
         # Use id_card_image if available, otherwise use original image
         image_to_encode = image_path
-        if id_card_image is not None:
-            # Save the ID card image temporarily
-            base_name = image_path.split('/')[-1]
-            temp_id_path = "temp_id_" + base_name
-            cv2.imwrite(temp_id_path, cv2.cvtColor(id_card_image, cv2.COLOR_RGB2BGR))
-            image_to_encode = temp_id_path
+        # if id_card_image is not None:
+        #     # Save the ID card image temporarily
+        #     base_name = image_path.split('/')[-1]
+        #     temp_id_path = "temp_id_" + base_name
+        #     cv2.imwrite(temp_id_path, cv2.cvtColor(id_card_image, cv2.COLOR_RGB2BGR))
+        #     image_to_encode = temp_id_path
 
         # Getting the base64 string
         base64_image = self.encode_image(image_to_encode)
@@ -177,5 +177,5 @@ class DocumentParsingAgent:
         # Add the profile image path to the result if face was detected
         result_dict = json.loads(result)
         result_dict['observed']['profileImage'] = cropped_IRL_image_path if cropped_IRL_image_path else ""
-        result_dict['observed']['capturedImage'] = cropped_ID_image_path if cropped_ID_image_path else ""
+        # result_dict['observed']['capturedImage'] = cropped_ID_image_path if cropped_ID_image_path else ""
         return json.dumps(result_dict, indent=2)
