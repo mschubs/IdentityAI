@@ -5,6 +5,7 @@ from face_verification_agent import FaceVerificationAgent
 from decision_agent import DecisionAgent
 from typing import Any, Dict
 import json
+from enum import Enum
 
 # ---------------------------------------------------------
 # 5. Orchestrator Agent
@@ -19,6 +20,11 @@ def split_name(full_name):
         return parts[0], "", parts[1]
     else:  # First, middle, last name (or more)
         return parts[0], " ".join(parts[1:-1]), parts[-1]
+    
+class OrchestratorStatus(Enum):
+    DORMANT = "DORMANT"
+    AWAITING_LICENSE = "AWAITING_LICENSE"
+    PROCESSING = "PROCESSING"
     
 class OrchestratorAgent:
     """
@@ -47,7 +53,20 @@ class OrchestratorAgent:
         self.face_verifier = face_verifier
         self.osint_agent = osint_agent
         self.decision_agent = decision_agent
-        
+        self.status: OrchestratorStatus = OrchestratorStatus.DORMANT
+
+    def accept_image(self, image_url: bytes):
+        if self.status == OrchestratorStatus.DORMANT:
+            # image is a face image
+            # do the face image processing (reverse image agent)
+            output = self.reverse_image_agent.run(image_url)
+        elif self.status == OrchestratorStatus.AWAITING_LICENSE:
+            # image is a license image
+            # do the license image processing
+            pass
+        else:
+            # do nothing, not in a state to accept images
+            pass
 
     def run_verification(
         self,
