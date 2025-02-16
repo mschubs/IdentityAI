@@ -38,7 +38,7 @@ from firecrawl import FirecrawlApp
 
 app = FirecrawlApp(api_key="fc-28cce56afd4c4218852a6a700a2099d4")
 
-load_dotenv('.env')  # Load variables from .env
+load_dotenv('secret.env')  # Load variables from .env
 
 # ---------------------------------------------------------
 # 3. OSINT Agent (Stub)
@@ -114,7 +114,72 @@ class OSINTAgent:
 
         response = requests.post(url, headers=headers, json=payload)
 
-        return response.json()  # Return the JSON response
+        return response.json()
+    
+    def choose_best_function(self, query: str) -> str:
+        """
+        Chooses the best function to use based on the query by sending a GROQ query.
+        It then calls the appropriate function (fast people search or Sonar API) and
+        returns the result of that function.
+        """
+        groq_prompt = '''
+        {
+        "function": $query match "*person search*" ? "person" : "sonar",
+        "parameters": $query match "*person search*" ? {
+            "firstName": substring($query, 0, indexOf($query, " ")),
+            "lastName": substring($query, indexOf($query, " ") + 1)
+        } : {
+            "query": $query
+        }
+        }
+        '''
+
+        # Instantiate the Groq client using the API key from environment variables.
+        client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+        
+        # Send the prompt as a chat message to Groq.
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "user", "content": groq_prompt}
+            ],
+            model="llama-3.3-70b-versatile",
+        )
+        
+        # Extract and parse the Groq response.
+        response_content = chat_completion.choices[0].message.content
+        try:
+            groq_response = json.loads(response_content)
+        except json.JSONDecodeError:
+            # Fallback to simple matching if JSON parsing fails.
+            if "person search" in query.lower():
+                groq_response = {
+                    "function": "person",
+                    "parameters": {
+                        "firstName": query.split()[0],
+                        "lastName": query.split()[1] if len(query.split()) > 1 else ""
+                    }
+                }
+            else:
+                groq_response = {
+                    "function": "sonar",
+                    "parameters": {"query": query}
+                }
+    
+        print(groq_response)
+
+        # Decide which function to call based on the Groq response.
+        if groq_response.get("function") == "person":
+            print("Running fast people search")
+            params = groq_response.get("parameters", {})
+            result = self.run_fastpeople(params)
+        else:
+            print("Running Sonar API")
+            sonar_query = groq_response.get("parameters", {}).get("query", query)
+            result = self.run_sonar_query(sonar_query)
+        
+        return result
+
+
 
     # Not Used
     def run_osint_checks(
@@ -172,7 +237,10 @@ if __name__ == "__main__":
     #     response = agent.run_fastpeople(test_args)
     #     print("Response from run_fastpeople:", response)
 
-        response = agent.run_sonar_query("Who is Nandan Srikrishna?")
-        print("Response from run_sonar_query:", response)
+        # response = agent.run_sonar_query("Who is Nandan Srikrishna?")
+        # print("Response from run_sonar_query:", response)
+
+        result = agent.choose_best_function("Nandan Srikrishna person search")
+        print("Result from choose_best_function:", result)
     except Exception as e:
         print(f"Error occurred: {str(e)}")
