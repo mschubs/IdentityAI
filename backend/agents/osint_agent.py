@@ -102,8 +102,6 @@ class OSINTAgent:
         response = requests.post(url, headers=headers, json=payload)
         data = response.json()
 
-        print("Data:", data)
-
         # Process the returned JSON to only include fullName, fullAddress, and age.
         filtered_persons = []
         for person in data.get("persons", []):
@@ -116,10 +114,16 @@ class OSINTAgent:
             if addresses:
                 full_address = addresses[0].get("fullAddress", "")
             
+            # Split the full_address by ";" and remove any leading/trailing whitespace
+            parts = [part.strip() for part in full_address.split(";")]
+            address_line_1 = parts[0] if len(parts) > 0 else ""
+            address_line_2 = parts[1] if len(parts) > 1 else ""
+            
             filtered_persons.append({
-                "fullName": full_name,
+                "name": full_name,
                 "age": age,
-                "fullAddress": full_address
+                "address-line-1": address_line_1,
+                "address-line-2": address_line_2
             })
 
         # Return the filtered data as JSON
