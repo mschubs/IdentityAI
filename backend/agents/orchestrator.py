@@ -1,5 +1,3 @@
-# orchestrator_agent.py
-
 import asyncio
 from typing import Any, Dict, Optional
 from enum import Enum
@@ -24,7 +22,7 @@ def split_name(full_name):
         return parts[0], "", ""
     elif len(parts) == 2:  # First and last name
         return parts[0], "", parts[1]
-    else:  # First, middle, last name (or more)
+    else:  # e.g., First, middle, last
         return parts[0], " ".join(parts[1:-1]), parts[-1]
 
 class OrchestratorAgent:
@@ -159,18 +157,18 @@ class OrchestratorAgent:
             await self.reverse_image_future
 
         # We'll store consolidated OSINT data in a dictionary. Let's start with fast_people_results:
-        # (some APIs return string JSON, so parse if necessary)
         try:
-            # TODO: append the results of reverse_image_agent_output to osint_data
             osint_data = json.loads(self.fast_people_results)
         except:
             osint_data = {"fastPeople": self.fast_people_results}
 
         # Step 4: Decision Loop
-        max_iterations = 3
+        max_iterations = 2
         iteration = 0
-
         final_result = None
+
+        # Keep track of last REQUEST_QUERY to detect repeats
+        last_query = None
 
         while iteration < max_iterations:
             iteration += 1
@@ -181,11 +179,9 @@ class OrchestratorAgent:
                 face_similarity=self.face_similarity,
                 osint_data=osint_data
             )
-            
 
             action = decision_output.get("ACTION", "FINAL_INVALID")
             if action == "REQUEST_MORE_DATA":
-                # The DecisionAgent wants more OSINT data
                 query_for_osint = decision_output.get("REQUEST_QUERY", "")
                 if not query_for_osint:
                     # If we have no query, break to avoid infinite loop
@@ -193,18 +189,29 @@ class OrchestratorAgent:
                     final_result = decision_output
                     break
 
+                # If the same query is repeated, we assume no further resolution
+                if query_for_osint == last_query:
+                    print("DecisionAgent repeated the same OSINT query. Stopping.")
+                    final_result = {
+                        "REASONING": "Repeated the same OSINT request with no resolution.",
+                        "ACTION": "FINAL_INVALID",
+                        "REQUEST_QUERY": "",
+                        "CONFIDENCE_LEVEL": "low"
+                    }
+                    break
+
+                last_query = query_for_osint
                 print("DecisionAgent requests more data with query:", query_for_osint)
+
                 # Re-invoke OSINT with the new query
-                # We'll just call `choose_best_function` for demonstration
-                # You could also parse the query more deeply.
                 new_osint_result = self.osint_agent.choose_best_function(query_for_osint)
 
                 # Attempt to parse as JSON (depends on what the OSINT function returns)
                 try:
                     new_osint_result_json = json.loads(new_osint_result)
                 except:
-                    new_osint_result_json = {"sonarOrPeopleSearch": new_osint_result}
-                
+                    new_osint_result_json = {"additional": new_osint_result}
+
                 # Merge new OSINT data into our existing `osint_data` under a new key
                 osint_data[f"iteration_{iteration}_extra"] = new_osint_result_json
 
@@ -219,7 +226,7 @@ class OrchestratorAgent:
                 "REASONING": "Max iterations reached, no conclusive result.",
                 "ACTION": "FINAL_INVALID",
                 "REQUEST_QUERY": "",
-                "CONFIDENCE_LEVEL": "low"
+                "CONFIDENCE_LEVEL": "low",
             }
 
         # Step 5: Persist results
@@ -229,16 +236,20 @@ class OrchestratorAgent:
         # Step 6: Reset everything to accept next user
         self.reset()
         return final_result
-    
+
+
 async def process_images():
     document_parser = DocumentParsingAgent()
     reverse_image_agent = ReverseImageAgent()
     face_verifier = FaceVerificationAgent()
     osint_agent = OSINTAgent()
     decision_agent = DecisionAgent()    
-    orchestrator = OrchestratorAgent(document_parser, reverse_image_agent, face_verifier, osint_agent, decision_agent)
+    orchestrator = OrchestratorAgent(
+        document_parser, reverse_image_agent, face_verifier, osint_agent, decision_agent
+    )
     await orchestrator.accept_image("/Users/derekmiller/Downloads/nandan_face.jpg")
     await orchestrator.accept_image("/Users/derekmiller/Downloads/nandan_id.jpg")
 
-# Then call it with:
-asyncio.run(process_images())
+
+if __name__ == "__main__":
+    asyncio.run(process_images())

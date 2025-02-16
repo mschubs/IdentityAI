@@ -1,5 +1,5 @@
 {
-  "REASONING": "Max iterations reached, no conclusive result.",
+  "REASONING": "Multiple mismatches: ['name', 'dob', 'address']. The data is contradictory.",
   "ACTION": "FINAL_INVALID",
   "REQUEST_QUERY": "",
   "CONFIDENCE_LEVEL": "low"

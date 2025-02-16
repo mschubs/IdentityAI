@@ -1,11 +1,9 @@
-# decision_agent.py
-
-from typing import Dict, Any
 import os
-from dotenv import load_dotenv
 import json
+from typing import Dict, Any
+from dotenv import load_dotenv
 from groq import Groq
-import time
+import datetime
 
 deepseek_model = "deepseek-r1-distill-llama-70b"
 llama_model = "llama-3.3-70b-versatile"
@@ -43,8 +41,9 @@ Criteria for validity:
 
 If the data is definitely contradictory, declare FINAL_INVALID.
 If you are confident the ID is real, declare FINAL_VALID.
-If you need more data regarding the Name, Address, or DOB, set ACTION=REQUEST_MORE_DATA and fill in REQUEST_QUERY with the data you need from OSINT. Only request clarifications on Name, Address, or DOB. Do not request data about SSN, job, phone, or relatives.
+If you need more data regarding the Name, Address, or DOB, set ACTION=REQUEST_MORE_DATA and fill in REQUEST_QUERY with the data you need from OSINT. Only request clarifications on Name, Address, or DOB. Do not request data about SSN, phone, or relatives.
 """
+
 
 def create_chat_completion(content, model, client):
     return client.chat.completions.create(
@@ -56,6 +55,57 @@ def create_chat_completion(content, model, client):
         ],
         model=model,
     )
+
+
+def parse_dob(dob_str: str):
+    """
+    Attempt to parse an incoming DOB string into a datetime.date object.
+    Handles formats like YYYY-MM-DD, MM/DD/YYYY, etc.
+    Return None if parsing fails.
+    """
+    dob_str = dob_str.strip()
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.datetime.strptime(dob_str, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def do_dobs_match(id_dob_str: str, osint_dob_str: str, osint_age_str: str = "") -> bool:
+    """
+    1) If OSINT has a DOB string, parse both and check exact match.
+    2) If OSINT lacks DOB but has an age, compare approximate age.
+    """
+    if osint_dob_str:
+        id_date = parse_dob(id_dob_str)
+        osint_date = parse_dob(osint_dob_str)
+        if id_date and osint_date:
+            return id_date == osint_date
+        return False
+
+    # If no OSINT DOB string but there's an OSINT age
+    if osint_age_str:
+        try:
+            osint_age = int(osint_age_str)
+        except:
+            osint_age = None
+        if not osint_age:
+            return False
+
+        id_date = parse_dob(id_dob_str)
+        if not id_date:
+            return False
+
+        # Compare approximate age
+        current_year = datetime.date.today().year
+        possible_age = current_year - id_date.year
+        # If we're within a year or two, call it good
+        return abs(possible_age - osint_age) <= 2
+
+    # If there's absolutely no OSINT DOB or age
+    return False
+
 
 class DecisionAgent:
     """
@@ -75,40 +125,63 @@ class DecisionAgent:
 
     def update_verification_state(self, id_data, face_similarity, osint_data):
         """Updates the verification state based on current data"""
-        # Update face verification
+
+        # 1) Face verification
         self.verification_state["face"] = {
             "verified": face_similarity >= 0.7,
             "confidence": face_similarity
         }
 
-        # Extract name from ID and OSINT
-        id_name = id_data.get("name", "").lower()
-        osint_name = osint_data.get("person_info", {}).get("full_name", "").lower()
+        # 2) Compare Name
+        id_name = id_data.get("name", "").strip().lower()
+        osint_name = osint_data.get("person_info", {}).get("full_name", "").strip().lower()
+        name_verified = (id_name == osint_name) if (id_name and osint_name) else False
+
         self.verification_state["name"] = {
-            "verified": id_name == osint_name,
-            "confidence": "high" if id_name == osint_name else "low"
+            "verified": name_verified,
+            "confidence": "high" if name_verified else "low"
         }
 
-        # Extract and compare DOB
-        id_dob = id_data.get("dateOfBirth")
-        osint_dob = osint_data.get("person_info", {}).get("date_of_birth")
-        # You might need to standardize date formats here
+        # 3) Compare DOB
+        id_dob_str = id_data.get("dateOfBirth", "")
+        # OSINT might have date_of_birth or might just have 'age'
+        osint_dob_str = osint_data.get("person_info", {}).get("date_of_birth", "")
+        osint_age_str = osint_data.get("person_info", {}).get("age", "")
+
+        dob_verified = do_dobs_match(id_dob_str, osint_dob_str, osint_age_str)
         self.verification_state["dob"] = {
-            "verified": id_dob == osint_dob,
-            "confidence": "high" if id_dob == osint_dob else "low"
+            "verified": dob_verified,
+            "confidence": "high" if dob_verified else "low"
         }
 
-        # Compare addresses (might need more sophisticated comparison)
-        id_address = f"{id_data.get('address-line-1', '')} {id_data.get('address-line-2', '')}".lower()
-        osint_current_address = next(
-            (addr for addr in osint_data.get("addresses", []) if addr.get("current")),
-            {}
+        # 4) Compare address
+        # Build the ID's full address
+        id_address = (
+            (id_data.get("address-line-1","") + " " + id_data.get("address-line-2",""))
+            .strip()
+            .lower()
         )
-        osint_address = f"{osint_current_address.get('address', '')} {osint_current_address.get('city', '')} {osint_current_address.get('state', '')} {osint_current_address.get('zip', '')}".lower()
-        
+
+        # OSINT might have multiple addresses
+        addresses = osint_data.get("addresses", [])
+        address_verified = False
+        for addr in addresses:
+            full_osint_addr = (
+                addr.get("address","") + " " +
+                addr.get("city","") + " " +
+                addr.get("state","") + " " +
+                addr.get("zip","")
+            ).strip().lower()
+            # Simple substring check
+            if id_address and full_osint_addr and (
+                id_address in full_osint_addr or full_osint_addr in id_address
+            ):
+                address_verified = True
+                break
+
         self.verification_state["address"] = {
-            "verified": id_address in osint_address or osint_address in id_address,
-            "confidence": "high" if id_address in osint_address or osint_address in id_address else "low"
+            "verified": address_verified,
+            "confidence": "high" if address_verified else "low"
         }
 
     def make_final_decision(
@@ -126,7 +199,35 @@ class DecisionAgent:
         """
         self.update_verification_state(id_data, face_similarity, osint_data)
 
-        # Format decision history for the prompt
+        # Do a quick check for multiple mismatches or a direct contradiction
+        mismatches = []
+        for field in ["name","dob","address","face"]:
+            if not self.verification_state[field]["verified"]:
+                mismatches.append(field)
+
+        # If we have multiple mismatches, let's short-circuit
+        if len(mismatches) > 1:
+            # Direct contradiction: we can finalize invalid
+            return {
+                "REASONING": f"Multiple mismatches: {mismatches}. The data is contradictory.",
+                "ACTION": "FINAL_INVALID",
+                "REQUEST_QUERY": "",
+                "CONFIDENCE_LEVEL": "low"
+            }
+
+        # If everything is verified
+        all_verified = all(self.verification_state[f]["verified"] for f in ["name","dob","address","face"])
+        if all_verified:
+            return {
+                "REASONING": "All data matches across ID, face, and OSINT. Confident valid.",
+                "ACTION": "FINAL_VALID",
+                "REQUEST_QUERY": "",
+                "CONFIDENCE_LEVEL": "high"
+            }
+
+        # If exactly one mismatch, the LLM prompt might want to do one more pass
+        # But let's see if we want to yield to the LLM or do a direct approach
+        # We'll continue letting the LLM attempt to form a final answer, but we supply the context
         decision_history_text = "\n".join([
             f"Iteration {i+1}:"
             f"\nAction: {decision['ACTION']}"
@@ -154,7 +255,12 @@ class DecisionAgent:
         print("Raw DecisionAgent response:\n", response_text)
 
         # Clean and parse the response
-        cleaned_response = response_text.replace("```json", "").replace("```", "").strip()
+        cleaned_response = (
+            response_text
+            .replace("```json", "")
+            .replace("```", "")
+            .strip()
+        )
         try:
             decision_output = json.loads(cleaned_response)
             # Store this decision in history
@@ -180,118 +286,3 @@ class DecisionAgent:
             "face": {"verified": False, "confidence": None}
         }
         self.decision_history = []
-
-if __name__ == "__main__":
-    decision_agent = DecisionAgent()
-    mock_id_data = {
-        "name": "Sarah Jane Wilson",
-        "address-line-1": "1234 Maple Street",
-        "address-line-2": "San Francisco, CA 94110",
-        "dateOfBirth": "1992-03-15",
-        "expirationDate": "2025-06-30",
-        "stateOfIssue": "CA",
-        "issueDate": "2021-06-30",
-        "gender": "F",
-        "height": "5'-6\"",
-        "eyeColor": "BRN",
-    }
-    face_similarity = 0.85
-    mock_osint_data = {
-        "person_info": {
-            "full_name": "Sarah Jane Wilson",
-            "age": "31",
-            "date_of_birth": "03/15/1992",
-            "gender": "Female",
-            "aliases": ["Sarah J Wilson", "Sarah Wilson"]
-        },
-        "addresses": [
-            {
-                "current": True,
-                "address": "1234 Maple Street",
-                "city": "San Francisco",
-                "state": "CA",
-                "zip": "94110",
-                "timespan": "2019-present"
-            },
-            {
-                "current": False,
-                "address": "567 Oak Avenue",
-                "city": "Berkeley",
-                "state": "CA",
-                "zip": "94703",
-                "timespan": "2015-2019"
-            }
-        ],
-        "phone_numbers": [
-            {
-                "number": "(415) 555-0123",
-                "type": "Mobile",
-                "carrier": "Verizon"
-            }
-        ],
-        "relatives": [
-            {
-                "name": "Michael Wilson",
-                "relationship": "Father",
-                "age": "58"
-            },
-            {
-                "name": "Jennifer Wilson",
-                "relationship": "Mother",
-                "age": "56"
-            }
-        ],
-        "employment": [
-            {
-                "employer": "Tech Solutions Inc",
-                "title": "Software Engineer",
-                "timespan": "2018-present"
-            }
-        ],
-        "education": [
-            {
-                "institution": "UC Berkeley",
-                "degree": "BS Computer Science",
-                "graduation_year": "2014"
-            }
-        ],
-        "social_media": [
-            {
-                "platform": "LinkedIn",
-                "profile_url": "linkedin.com/in/sarahjwilson",
-                "last_active": "2023"
-            }
-        ],
-        "public_records": {
-            "property_records": [
-                {
-                    "address": "1234 Maple Street",
-                    "purchase_date": "2019-05",
-                    "purchase_price": "$950,000"
-                }
-            ],
-            "vehicle_registrations": [
-                {
-                    "make": "Toyota",
-                    "model": "RAV4",
-                    "year": "2020",
-                    "state": "CA"
-                }
-            ],
-            "licenses": [
-                {
-                    "type": "Driver's License",
-                    "state": "CA",
-                    "status": "Active",
-                    "expiration": "2025-06-30"
-                }
-            ]
-        },
-        "data_confidence_score": 0.92,
-        "last_updated": "2024-03-15"
-    }
-    start_time = time.time()
-    print(decision_agent.make_final_decision(mock_id_data, face_similarity, mock_osint_data))
-    end_time = time.time()
-    print(f"Time for decision: {end_time - start_time} seconds")
-        
