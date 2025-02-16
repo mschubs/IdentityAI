@@ -7,6 +7,11 @@ import shutil
 import os
 from datetime import datetime
 
+from agents.orchestrator import OrchestratorAgent
+from agents.document_agent import DocumentParsingAgent
+from agents.face_verification_agent import FaceVerificationAgent
+from agents.osint_agent import OSINTAgent
+from agents.decision_agent import DecisionAgent
 
 app = FastAPI()
 
@@ -26,6 +31,20 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 class FaceCompareRequest(BaseModel):
     known_image: str
     unknown_image: str
+
+doc_parser = DocumentParsingAgent()
+face_verifier = FaceVerificationAgent()
+osint_agent = OSINTAgent()
+decision_agent = DecisionAgent()
+
+# Create the orchestrator
+orchestrator = OrchestratorAgent(
+    document_parser=doc_parser,
+    face_verifier=face_verifier,
+    osint_agent=osint_agent,
+    decision_agent=decision_agent
+)
+
 
 @app.post("/compare-faces")
 async def compare_face_images(request: FaceCompareRequest):
@@ -50,6 +69,9 @@ async def upload_image(file: UploadFile = File(...)):
     # Save the uploaded file
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+        
+    # pass image to orchestrator
+    orchestrator.accept_image(file_path)
     
     # Pass image to id to text, and gets this out
     # "observed": {

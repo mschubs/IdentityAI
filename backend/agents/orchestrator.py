@@ -53,16 +53,25 @@ class OrchestratorAgent:
         self.face_verifier = face_verifier
         self.osint_agent = osint_agent
         self.decision_agent = decision_agent
+        self.reverse_image_agent_output = reverse_image_agent
         self.status: OrchestratorStatus = OrchestratorStatus.DORMANT
+        self.face_image_url = None
+        self.license_image_url = None
+        self.reverse_image_agent_output = None
+        
 
-    def accept_image(self, image_url: bytes):
+    def accept_image(self, image_url: str):
         if self.status == OrchestratorStatus.DORMANT:
             # image is a face image
-            # do the face image processing (reverse image agent)
-            output = self.reverse_image_agent.run(image_url)
+            # TODO: do something with the output
+            self.status = OrchestratorStatus.AWAITING_LICENSE
+            self.face_image_url = image_url
+            self.reverse_image_agent_output = self.reverse_image_agent.run(image_url)
         elif self.status == OrchestratorStatus.AWAITING_LICENSE:
             # image is a license image
-            # do the license image processing
+            self.status = OrchestratorStatus.PROCESSING
+            self.license_image_url = image_url
+            self.run_verification()
             pass
         else:
             # do nothing, not in a state to accept images
@@ -70,8 +79,6 @@ class OrchestratorAgent:
 
     def run_verification(
         self,
-        selfie_image: bytes,
-        id_image: bytes
     ) -> Dict[str, Any]:
         """
         Runs the entire identity verification pipeline.
@@ -85,31 +92,25 @@ class OrchestratorAgent:
             OSINT findings, and final verification decision.
         """
         # 1. Parse the ID
-        parsed_data = self.document_parser.parse_id_document(id_image)
+        parsed_data = self.document_parser.parse_id_document(self.license_image_url)
         name = parsed_data["name"]
         address1 = parsed_data["address-line-1"]
         address2 = parsed_data["address-line-2"]
         dateOfBirth = parsed_data["dateOfBirth"]
         idFaceImage_path = parsed_data["capturedImage"]
         realFace_path = parsed_data["profileImage"]
+        
 
         firstName, middleName, lastName = split_name(name)
 
+        # TODO: update json to show id info
+
         # 2. Face Verification
         face_similarity = self.face_verifier.compare_faces(idFaceImage_path, realFace_path)
+        
+        # TODO: check for early stop (update json with result and return)
 
-        website_data_task = loop.run_in_executor(self.executor, self.reverse_image_agent.do_reverse_search, realFace_path)
-        osint_task = loop.run_in_executor(self.executor, self.osint_agent.run_fastpeople, {
-            "FirstName": firstName,
-            "MiddleName": middleName,
-            "LastName": lastName,
-            "address2": address2,
-        })
-
-        # 3. Reverse Image Search
-        website_data = self.reverse_image_agent.do_reverse_search(realFace_path)
-
-        # 4. OSINT Checks (using either the ID face or the selfie)
+        # 3. OSINT Checks (using the face image)
         #    Typically you might pass the best quality face image available.
         fast_people_results = self.osint_agent.run_fastpeople({
             {
@@ -120,21 +121,13 @@ class OrchestratorAgent:
             }
         })
 
-        # 4. Final Decision
-        decision_output = self.decision_agent.make_final_decision(
-            parsed_data=parsed_data,
-            face_similarity=face_similarity,
-            osint_data=osint_data
-        )
+        # AGENT LOOP
+        
 
         # Combine everything into a final result object
-        final_result = {
-            "parsedData": parsed_data,
-            "faceMatchScore": face_similarity,
-            "osintData": osint_data,
-            "decision": decision_output
-        }
-        return final_result
+        final_result = {}
+        # TODO: update json with result and return
+        return
 
 # ---------------------------------------------------------
 # Example usage
