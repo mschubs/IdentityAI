@@ -13,6 +13,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { PieChart, Pie, Cell } from "recharts";
 
 const previousIDs = [
   {
@@ -142,8 +143,12 @@ function App() {
           }),
         });
         const data = await response.json();
+        console.log(data.result);
 
-        setFaceSimilarityResults((prev) => [...prev, data.result]);
+        setFaceSimilarityResults((prev) => [
+          ...prev,
+          [parseInt(data.result) > 50 ? true : false, data.result],
+        ]);
         setApiCallsInProgress(false);
         setCurrentIndex((prev) => prev + 1);
       } catch (error) {
@@ -268,20 +273,66 @@ function App() {
                                 Server is not running
                               </span>
                             </>
-                          ) : faceSimilarityResults[index] ? (
-                            <>
-                              <span className="text-green-600">
-                                Face similarity passed
-                              </span>
-                              <Check className="w-5 h-5 text-green-500" />
-                            </>
                           ) : (
-                            <>
-                              <span className="text-red-600">
-                                Face similarity failed
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={
+                                  faceSimilarityResults[index][0]
+                                    ? "text-green-600"
+                                    : "text-red-600"
+                                }
+                              >
+                                {faceSimilarityResults[index][0]
+                                  ? "Face similarity passed"
+                                  : "Face similarity failed"}
                               </span>
-                              <X className="w-5 h-5 text-red-500" />
-                            </>
+                              {/* {faceSimilarityResults[index][0] ? (
+                                <Check className="w-5 h-5 text-green-500" />
+                              ) : (
+                                <X className="w-5 h-5 text-red-500" />
+                              )} */}
+                              <div className="flex flex-col">
+                                <PieChart
+                                  className="mr-2"
+                                  width={50}
+                                  height={50}
+                                >
+                                  <Pie
+                                    data={[
+                                      {
+                                        value: faceSimilarityResults[index][1],
+                                      },
+                                      {
+                                        value:
+                                          100 - faceSimilarityResults[index][1],
+                                      },
+                                    ]}
+                                    cx={25}
+                                    cy={20}
+                                    innerRadius={15}
+                                    outerRadius={20}
+                                    startAngle={90}
+                                    endAngle={-270}
+                                    dataKey="value"
+                                    // animationBegin={0}
+                                    // animationDuration={1000}
+                                    // isAnimationActive={true}
+                                  >
+                                    <Cell
+                                      fill={
+                                        faceSimilarityResults[index][0]
+                                          ? "#22c55e"
+                                          : "#ef4444"
+                                      }
+                                    />
+                                    <Cell fill="#e5e7eb" />
+                                  </Pie>
+                                </PieChart>
+                                <span className="mt-2 text-sm">
+                                  {faceSimilarityResults[index][1].toFixed(2)}%
+                                </span>
+                              </div>
+                            </div>
                           )}
                         </h2>
                         {/* <p className="text-gray-500">ID: {onlineData.idNumber}</p> */}

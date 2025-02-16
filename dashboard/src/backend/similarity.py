@@ -17,7 +17,7 @@ def l2_to_percent(distance, threshold=0.6):
 
 
 def compare_face_encodings(known_encoding, unknown_encoding):
-    results = l2_to_percent(np.linalg.norm(np.array(known_encoding) - np.array(unknown_encoding)))
+    return l2_to_percent(np.linalg.norm(np.array(known_encoding) - np.array(unknown_encoding)))
 
 def compare_faces(known_image_path, unknown_image_path):
     print("Comparing faces...")

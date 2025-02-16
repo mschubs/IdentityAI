@@ -22,6 +22,6 @@ class FaceCompareRequest(BaseModel):
 async def compare_face_images(request: FaceCompareRequest):
     try:
         result = compare_faces(request.known_image, request.unknown_image)
-        return {"success": True, "result": bool(result)}
+        return {"success": True, "result": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) 
