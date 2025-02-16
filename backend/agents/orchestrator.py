@@ -6,11 +6,11 @@ import shutil
 import json
 import datetime
 
-from document_agent import DocumentParsingAgent
-from reverse_image_agent import ReverseImageAgent
-from face_verification_agent import FaceVerificationAgent
-from osint_agent import OSINTAgent
-from decision_agent import DecisionAgent
+from .document_agent import DocumentParsingAgent
+from .reverse_image_agent import ReverseImageAgent
+from .face_verification_agent import FaceVerificationAgent
+from .osint_agent import OSINTAgent
+from .decision_agent import DecisionAgent
 
 class OrchestratorStatus(Enum):
     DORMANT = "DORMANT"
@@ -66,16 +66,6 @@ class OrchestratorAgent:
             self.face_image_url = image_url
             print("running reverse image agent")
 
-            # Load from cache if available
-            if os.path.exists("reverse_image_agent_output.json"):
-                with open("reverse_image_agent_output.json", "r") as f:
-                    self.reverse_image_agent_output = json.load(f)
-            else:
-                self.reverse_image_future = asyncio.create_task(
-                    asyncio.to_thread(self.reverse_image_agent.run, image_url)
-                )
-                asyncio.create_task(self._cache_reverse_image_result())
-
         elif self.status == OrchestratorStatus.AWAITING_LICENSE:
             # License image
             self.status = OrchestratorStatus.PROCESSING
@@ -118,6 +108,13 @@ class OrchestratorAgent:
         address1 = observed_data["address-line-1"]
         address2 = observed_data["address-line-2"]
         dateOfBirth = observed_data["dateOfBirth"]
+        print("running reverse image agent")
+        self.reverse_image_agent_output = await asyncio.to_thread(
+            self.reverse_image_agent.run,
+            self.face_image_url,
+            name
+        )
+        print("running reverse image agent done")
         
         # Add age calculation via LLM
         age_prompt = f"""Given today's date and a date of birth, calculate the person's current age.
@@ -131,6 +128,7 @@ class OrchestratorAgent:
             model="gpt-4o",
             temperature=0
         )
+
         calculated_age = age_response.choices[0].message.content.strip()
         observed_data["calculatedAge"] = calculated_age
 

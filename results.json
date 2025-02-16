@@ -1,5 +1,5 @@
 {
-  "REASONING": "The face similarity score is perfect at 100.0, indicating a strong match. The name and date of birth are verified with high confidence and match the OSINT data. However, there is a mismatch in the address between the ID data and OSINT data, which is marked with low confidence. Given the high confidence in the other fields and the perfect face match, the ID is likely valid despite the address discrepancy.",
-  "ACTION": "FINAL_VALID",
+  "REASONING": "Found 1 mismatched fields: {'name': 'verified', 'age': 'unknown', 'address': 'mismatch', 'face': 'verified'}",
+  "ACTION": "FINAL_INVALID",
   "CONFIDENCE_LEVEL": "medium"
 }
