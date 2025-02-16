@@ -1,0 +1,331 @@
+import os
+import time
+import random
+import json
+import re
+import concurrent.futures
+
+import undetected_chromedriver as uc
+from openpyxl import load_workbook
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from dotenv import load_dotenv
+
+from groq import Groq
+from firecrawl import FirecrawlApp
+
+# Load environment variables
+load_dotenv()
+
+class ReverseImageAgent:
+    def __init__(self):
+        """
+        Initialize the scraper, load cookies, set up Firecrawl and Groq clients,
+        and prepare the paths needed.
+        """
+        # Firecrawl
+        self.app = FirecrawlApp(api_key="fc-28cce56afd4c4218852a6a700a2099d4")
+        
+        # Groq client
+        self.client = Groq(
+            api_key=os.environ.get("GROQ_API_KEY"),
+        )
+
+        # Read cookies from local JSON
+        with open('backend/agents/cookies.json', 'r') as f:
+            self.cookies = json.load(f)
+
+        # Pimeyes constants
+        self.pimeyes_url = "https://pimeyes.com/en"
+
+        # Paths
+        self.CURR_SCRIPT_PATH = os.path.realpath(os.path.dirname(__file__))
+        self.profile_path = os.path.join(self.CURR_SCRIPT_PATH, "profile")
+
+        # Initialize undetected_chromedriver with profile
+        self.driver = self.open_chrome_with_profile()
+
+    def open_chrome_with_profile(self):
+        """
+        Open a Chrome session using an existing user profile.
+        """
+        options = uc.ChromeOptions()
+        options.add_argument(f"--user-data-dir={self.profile_path}")
+        driver = uc.Chrome(options=options)
+        return driver
+
+    def upload(self, path):
+        """
+        Upload an image to Pimeyes and return the results URL.
+        """
+        driver = self.driver
+        try:
+            # Wait for upload button
+            upload_button = WebDriverWait(driver, 20).until(
+                EC.element_to_be_clickable((By.XPATH, '//*[@id="hero-section"]/div/div[1]/div/div/div[1]/button[2]'))
+            )
+            upload_button.click()
+            
+            # Wait for file input and send file
+            file_input = WebDriverWait(driver, 20).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'input[type=file]'))
+            )
+            
+            time.sleep(random.uniform(1, 3))
+            file_input.send_keys(path)
+            time.sleep(random.uniform(4, 5))
+
+            # Wait for file to be processed - look for loading step to disappear
+            WebDriverWait(driver, 20).until(
+                EC.invisibility_of_element_located((By.CSS_SELECTOR, '.step.image-processing'))
+            )
+            print("uploaded file")
+
+            # Wait for submit button
+            print("finding submit button")
+            time.sleep(random.uniform(0.2, 1))
+            submit_buttons = WebDriverWait(driver, 15).until(
+                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "button[data-v-f20a56d6]"))
+            )
+            submit_button = submit_buttons[3]
+            time.sleep(random.uniform(0.2, 1))
+            # Wait for button to be clickable
+            WebDriverWait(driver, 15).until(
+                EC.element_to_be_clickable(submit_button)
+            )
+            driver.execute_script("arguments[0].click();", submit_button)
+            print("clicked submit button")
+            time.sleep(random.uniform(2, 2.5))
+            
+            # Wait for URL to change
+            WebDriverWait(driver, 20).until(
+                lambda d: d.current_url != self.pimeyes_url
+            )
+            return driver.current_url
+
+        except Exception as e:
+            print(f"An exception occurred during upload: {e}")
+
+    def get_results(self, url):
+        """
+        From the Pimeyes results page, navigate and extract each 'Open website' link
+        by intercepting Pimeyes's window.open calls.
+        """
+        driver = self.driver
+        print(f"Starting get_results with URL: {url}")
+        driver.get(url)
+        time.sleep(random.uniform(1, 2))
+        
+        # Add JavaScript to intercept navigation
+        intercept_script = """
+        window.open = function(url) {
+            document.body.setAttribute('data-last-url', url);
+            return { closed: false };  // Mock window object
+        };
+        """
+        driver.execute_script(intercept_script)
+        
+        # Wait for the main container to appear
+        print("Waiting for container to load...")
+        container = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "div.container.banner-content"))
+        )
+
+        rows = container.find_elements(By.CSS_SELECTOR, "div[class^='row-'][class*='results-row']")
+        images = []
+
+        # Traverse each row
+        for row in rows:
+            results_divs = row.find_elements(By.CSS_SELECTOR, "div[class^='results-']")
+            for rdiv in results_divs:
+                class_name = rdiv.get_attribute("class")
+                match = re.search(r"results-(\d+)", class_name)
+                if match:
+                    n = int(match.group(1))
+                else:
+                    n = 1
+
+                child_divs = rdiv.find_elements(By.CSS_SELECTOR, "div.result.visible")
+                if not child_divs:
+                    continue
+
+                if n != 1:
+                    child_divs = [child_divs[0]]
+
+                for child in child_divs:
+                    try:
+                        img = child.find_element(By.CSS_SELECTOR, "img[data-v-d11d31e3]")
+                        images.append(img)
+                    except:
+                        pass
+
+        print(f"Total extracted images (unique DOM elements): {len(images)}")
+        
+        results = []
+        
+        for i, image in enumerate(images, 1):
+            print(f"\nProcessing image {i}/{len(images)}")
+
+            # Wait for any loading indicators to disappear
+            print("Waiting for loading indicators to disappear...")
+            WebDriverWait(driver, 10).until(
+                EC.invisibility_of_element_located((By.CSS_SELECTOR, "p[data-v-1825a511]"))
+            )
+            
+            print("Scrolling image into view...")
+            driver.execute_script("arguments[0].scrollIntoView(true);", image)
+            
+            # Wait for image to be visible/clickable
+            WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable(image)
+            )
+            time.sleep(random.uniform(0.2, 0.3))
+
+            print("Clicking on image...")
+            driver.execute_script("arguments[0].click();", image)
+            time.sleep(random.uniform(0.1, 0.2))
+
+            # Check for subgrid
+            subgrid_images = driver.find_elements(By.CSS_SELECTOR, "div.sub-grid div.result.visible")
+            subgrid_present = bool(subgrid_images)
+            print("subgrid_present: ", subgrid_present)
+
+            if subgrid_present:
+                try:
+                    WebDriverWait(driver, 2).until(
+                        EC.invisibility_of_element_located((By.CSS_SELECTOR, "div.mask"))
+                    )
+                except:
+                    actions = ActionChains(driver)
+                    actions.move_to_element(driver.find_element(By.TAG_NAME, "body"))\
+                           .move_by_offset(-300, 0).click().perform()
+                    time.sleep(random.uniform(0.2, 0.3))
+
+                print("Sub-grid detected, clicking first sub-grid image...")
+                driver.execute_script("arguments[0].scrollIntoView(true);", subgrid_images[0])
+                time.sleep(random.uniform(0.1, 0.2))
+                driver.execute_script("arguments[0].click();", subgrid_images[0])
+
+            try:
+                print("Looking for 'Open website' button...")
+                open_website_button = WebDriverWait(driver, 2).until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, "div.action-item:has(svg use[href='#icon-result-actions-open-website'])")
+                    )
+                )
+                open_website_button = WebDriverWait(driver, 2).until(
+                    EC.element_to_be_clickable(open_website_button)
+                )
+                time.sleep(random.uniform(0.1, 0.2))
+
+                print("Clicking 'Open website' button...")
+                open_website_button.click()
+
+                current_url = driver.execute_script(
+                    "return document.body.getAttribute('data-last-url');"
+                )
+                print(f"Intercepted URL: {current_url}")
+                results.append(current_url)
+
+                print("Closing modal...")
+                actions = ActionChains(driver)
+                actions.move_to_element(driver.find_element(By.TAG_NAME, "body"))\
+                       .move_by_offset(-300, 0).click().perform()
+                time.sleep(random.uniform(0.1, 0.2))
+
+                WebDriverWait(driver, 5).until(
+                    EC.invisibility_of_element_located((By.CSS_SELECTOR, "div.mask"))
+                )
+                print("Modal closed successfully")
+                time.sleep(random.uniform(0.1, 0.2))
+
+                if subgrid_present:
+                    print("Closing sub-grid after modal is closed...")
+                    close_btn = WebDriverWait(driver, 2).until(
+                        EC.element_to_be_clickable(
+                            (By.CSS_SELECTOR, "div.sub-grid div.sub-header button[type='button']")
+                        )
+                    )
+                    close_btn.click()
+                    WebDriverWait(driver, 5).until(
+                        EC.invisibility_of_element_located((By.CSS_SELECTOR, "div.sub-grid"))
+                    )
+                    
+                    driver.execute_script("arguments[0].scrollIntoView(true);", image)
+                    time.sleep(random.uniform(0.1, 0.2))
+
+            except Exception as e:
+                print(f"Error processing website button: {str(e)}")
+                if "timeout" in str(e).lower():
+                    print("Timeout occurred while waiting for element")
+                continue
+
+        return results
+
+    def scrape_urls(self, urls):
+        """
+        Use Firecrawl's scrape API to scrape each URL asynchronously.
+        """
+        def scrape_single_url(url):
+            try:
+                print("scraping url: ", url)
+                return self.app.scrape_url(
+                    url,
+                    params={'formats': ['markdown']}
+                )
+            except Exception as e:
+                print(f"Error scraping url: {e}", flush=True)
+                return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            ret = list(executor.map(scrape_single_url, urls))
+        return ret
+
+    def run(self, image_path):
+        """
+        Orchestrates the entire flow: 
+        1) Load Pimeyes, add cookies, refresh. 
+        2) Upload image. 
+        3) Gather results. 
+        4) Scrape URLs. 
+        5) Print or return data.
+        """
+        self.driver.get(self.pimeyes_url)
+
+        # Add cookies
+        for cookie in self.cookies:
+            self.driver.add_cookie({
+                'name': cookie['name'],
+                'value': cookie['value'],
+                'domain': cookie.get('domain', ''),
+                'path': cookie.get('path', '/')
+            })
+
+        self.driver.refresh()
+
+        # Upload
+        # results_url = self.upload(image_path)
+        results_url = "https://pimeyes.com/en/results/Jaw_25021534265fta2c3yq4y9f0f54a2?query=ffc0803e1f3ee0c000001981fdffe3db"
+
+        # Get final URL set
+        urls = self.get_results(results_url)
+
+        # Scrape them
+        webpage_data = self.scrape_urls(urls)
+        return webpage_data
+
+# from my_pimeyes_scraper import PimeyesScraper
+
+def do_reverse_search(image_path):
+    scraper = ReverseImageAgent()
+    data = scraper.run(image_path)
+    # do something with 'data'
+    return data
+
+if __name__ == "__main__":
+    # Example call
+    results = do_reverse_search("/Users/derekmiller/Documents/sideproj/IdentityAI/backend/agents/IMG_9276.jpg")
+    print(results)
