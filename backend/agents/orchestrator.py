@@ -96,13 +96,13 @@ class OrchestratorAgent:
 
     def reset(self):
         print("Resetting orchestrator")
-        # cancel any running tasks
-        if self.reverse_image_agent_output:
-            self.reverse_image_agent_output.cancel()
-        if self.face_similarity:
-            self.face_similarity.cancel()
-        if self.fast_people_results:
-            self.fast_people_results.cancel()
+        # Cancel the reverse_image_future if it exists and is still running
+        if hasattr(self, 'reverse_image_future'):
+            if not self.reverse_image_future.done():
+                self.reverse_image_future.cancel()
+            delattr(self, 'reverse_image_future')
+
+        # Reset all the state variables
         self.status = OrchestratorStatus.DORMANT
         self.face_image_url = None
         self.license_image_url = None
@@ -157,7 +157,7 @@ class OrchestratorAgent:
             }
         )
 
-        # Run both calls concurrently
+        # Run both calls concurrently and store the results
         self.face_similarity, self.fast_people_results = await asyncio.gather(
             face_verification_future, 
             fast_people_future
@@ -173,12 +173,9 @@ class OrchestratorAgent:
         # )
 
         
-        # make sure that all async variables have been awaited
-        await asyncio.gather(
-            self.face_similarity,
-            self.fast_people_results,
-            self.reverse_image_agent_output,
-        )
+        # Just wait for the reverse_image_future if it exists and hasn't been awaited
+        if hasattr(self, 'reverse_image_future') and not self.reverse_image_agent_output:
+            await self.reverse_image_future
         
         final_result = {
             "parsed_data": parsed_data,

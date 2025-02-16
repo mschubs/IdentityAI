@@ -9,7 +9,7 @@ from .osint_agent import OSINTAgent
 from .decision_agent import DecisionAgent
 from .reverse_image_agent import ReverseImageAgent
 from .orchestrator import OrchestratorAgent, OrchestratorStatus
-from .document_agent_helpers.face_detection import detect_primary_faces
+from .document_agent_helpers.face_detection import detect_primary_faces_yolo
 __all__ = [
     'DocumentParsingAgent',
     'FaceVerificationAgent',
@@ -18,7 +18,7 @@ __all__ = [
     'ReverseImageAgent',
     'OrchestratorAgent',
     'OrchestratorStatus',
-    'detect_primary_faces'
+    'detect_primary_faces_yolo'
 ]
 
 __version__ = '0.1.0'

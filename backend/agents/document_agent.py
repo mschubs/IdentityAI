@@ -8,7 +8,7 @@ import os
 from dotenv import load_dotenv
 import cv2
 import json
-from .document_agent_helpers.face_detection import detect_primary_faces
+from .document_agent_helpers.face_detection import detect_primary_faces_yolo
 
 class DocumentParsingAgent:
     """
@@ -103,20 +103,21 @@ class DocumentParsingAgent:
         # Process face detection first
         # _, _, cropped_faces, id_card_image = detect_primary_faces(image_path)
         print("image_path ", image_path)
-        _, _, cropped_faces_id = detect_primary_faces(image_path)
-        _, _, cropped_faces_face = detect_primary_faces(face_image_path)
+        _, _, cropped_faces_face = detect_primary_faces_yolo(face_image_path)
+        _, _, cropped_faces_id = detect_primary_faces_yolo(image_path)
 
-        # print("cropped_faces_id ", cropped_faces_id)
-        print("cropped_faces_face ", cropped_faces_face)
         # Save cropped faces
         cropped_IRL_image_path = None
         cropped_ID_image_path = None
         if cropped_faces_id is not None:
             base_name = image_path.split('/')[-1]
+            # write face
             cropped_IRL_image_path = "uploads-modified/cropped_IRL_" + base_name
-            cv2.imwrite(cropped_IRL_image_path, cv2.cvtColor(cropped_faces_face[0], cv2.COLOR_RGB2BGR))
+            cv2.imwrite(cropped_IRL_image_path, cropped_faces_face)
+
+            # write license pic
             cropped_ID_image_path = "uploads-modified/cropped_ID_" + base_name
-            cv2.imwrite(cropped_ID_image_path, cv2.cvtColor(cropped_faces_id[0], cv2.COLOR_RGB2BGR))
+            cv2.imwrite(cropped_ID_image_path, cropped_faces_id)
 
         # Use id_card_image if available, otherwise use original image
         image_to_encode = image_path
