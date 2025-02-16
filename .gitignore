@@ -6,3 +6,5 @@ uploads/
 reverse_search/profile/
 backend/agents/reverse_image_agent_helpers/profile
 .env
+*profile
+.venv

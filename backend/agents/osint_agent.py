@@ -6,11 +6,11 @@ from typing import Dict, Any, Optional
 from groq import Groq
 
 
-from openpyxl import load_workbook
+# from openpyxl import load_workbook
 
 # from selenium import webdriver
 # from selenium.webdriver.chrome.options import Options
-import undetected_chromedriver as uc
+# import undetected_chromedriver as uc
 
 import bs4
 from dotenv import load_dotenv
@@ -29,7 +29,7 @@ from selenium.webdriver.support import expected_conditions as EC
 import time
 import json
 import random
-import undetected_chromedriver as uc
+# import undetected_chromedriver as uc
 import re
 import requests
 
@@ -39,7 +39,6 @@ from firecrawl import FirecrawlApp
 app = FirecrawlApp(api_key="fc-28cce56afd4c4218852a6a700a2099d4")
 
 load_dotenv('.env')  # Load variables from .env
-
 
 # ---------------------------------------------------------
 # 3. OSINT Agent (Stub)
@@ -65,7 +64,7 @@ class OSINTAgent:
             "LastName": args["lastName"],
             "Addresses": [
                 {
-                    "AddressLine2": args["address2"],
+                    "AddressLine2": args.get("address2", ""),
                 }
             ],
         }
@@ -88,6 +87,34 @@ class OSINTAgent:
         
         response = requests.post(url, headers=headers, json=payload)
         return response.text
+
+    def run_sonar_query(self, query: str) -> Dict[str, Any]:
+        """
+        Queries the Sonar API with the provided query string.
+
+        Args:
+            query (str): The query string to send to the Sonar API.
+
+        Returns:
+            Dict[str, Any]: The response from the Sonar API.
+        """
+        url = "https://api.perplexity.ai/chat/completions"
+        headers = {
+            "accept": "application/json",
+            "Authorization": f"Bearer {os.getenv('SONAR_API_KEY')}",  # Ensure you have the API key in your .env
+            "content-type": "application/json"
+        }
+        payload = {
+            "model": "sonar",
+            "messages": [
+                {"role": "system", "content": "Be precise and concise."},
+                {"role": "user", "content": query}
+            ]
+        }
+
+        response = requests.post(url, headers=headers, json=payload)
+
+        return response.json()  # Return the JSON response
 
     # Not Used
     def run_osint_checks(
@@ -133,3 +160,19 @@ class OSINTAgent:
             "consolidatedConfidence": 0.88,
             "notes": "OSINT checks found consistent data with no obvious contradictions."
         }
+
+# Test Code
+if __name__ == "__main__":
+    try:
+        agent = OSINTAgent()
+    #     test_args = {
+    #         "firstName": "Nandan",
+    #         "lastName": "Srikrishna",
+    #     }
+    #     response = agent.run_fastpeople(test_args)
+    #     print("Response from run_fastpeople:", response)
+
+        response = agent.run_sonar_query("Who is Nandan Srikrishna?")
+        print("Response from run_sonar_query:", response)
+    except Exception as e:
+        print(f"Error occurred: {str(e)}")
