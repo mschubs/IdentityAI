@@ -134,8 +134,6 @@ class OrchestratorAgent:
         print("cropped_ID_image_path ", cropped_ID_image_path)
         firstName, middleName, lastName = split_name(name)
         
-        # 2. Face Verification
-        #    This might be CPU-bound or GPU-bound, so run it in a thread:
         face_verification_future = asyncio.to_thread(
             self.face_verifier.compare_faces, cropped_ID_image_path, cropped_face_image_path
         )
@@ -145,8 +143,6 @@ class OrchestratorAgent:
         shutil.copy(cropped_face_image_path, f"dashboard/public/{cropped_face_image_path.split('/')[-1]}")
         print("copied images to dashboard/public: ", cropped_ID_image_path.split('/')[-1], cropped_face_image_path.split('/')[-1])
 
-        # 3. OSINT Checks
-        #    Possibly also run in a thread if it does synchronous network calls:
         fast_people_future = asyncio.to_thread(
             self.osint_agent.run_fastpeople,
             {
@@ -162,27 +158,10 @@ class OrchestratorAgent:
             face_verification_future, 
             fast_people_future
         )
-
-        # AGENT LOOP
-        
-        # # 4. Combine everything and make a final decision
-        # final_decision = self.decision_agent.decide(
-        #     parsed_data, 
-        #     self.face_similarity, 
-        #     self.fast_people_results
-        # )
-
-        
-        # Just wait for the reverse_image_future if it exists and hasn't been awaited
         if hasattr(self, 'reverse_image_future') and not self.reverse_image_agent_output:
             await self.reverse_image_future
         
-        final_result = {
-            "parsed_data": parsed_data,
-            "face_similarity": self.face_similarity,
-            "osint_results": self.fast_people_results,
-            "reverse_image_agent_output": self.reverse_image_agent_output,
-        }
+        # AGENT LOOP
         
         # write these to a file
         with open("results.json", "w") as f:
