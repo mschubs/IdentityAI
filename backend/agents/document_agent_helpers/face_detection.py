@@ -3,105 +3,111 @@ import cv2
 import numpy as np
 from PIL import Image
 
-def detect_primary_faces(image_path, upsample=1, model='hog'):
+import cv2
+import numpy as np
+from ultralytics import YOLO
+
+# download model from https://github.com/akanametov/yolo-face?tab=readme-ov-file, get yolov8n-face.pt
+def detect_primary_faces_yolo(image_path, model_path="/Users/derekmiller/Documents/sideproj/IdentityAI/backend/agents/document_agent_helpers/yolov8n-face.pt"):
     """
-    Detect the two largest faces in an image.
-    
+    Detect the largest face in an image using a YOLO model.
+
     Args:
-        image_path (str): Path to the image file
-        upsample (int): Number of times to upsample the image
-        model (str): Detection model to use - 'hog' or 'cnn'
-    
+        image_path (str): Path to the image file.
+        model_path (str): Path to your trained YOLO model (e.g., 'yolov8n-face.pt').
+
     Returns:
-        tuple: (face_locations, annotated_image, cropped_faces)
+        tuple: (face_location, annotated_image, cropped_face)
+               - face_location: (top, right, bottom, left) for the largest detected face
+               - annotated_image: copy of the image with bounding box drawn
+               - cropped_face: cropped face image (as numpy array)
     """
-    # Load and convert the image
-    image = face_recognition.load_image_file(image_path)
-    
-    # Crop image by 50 pixels on all sides
-    height, width = image.shape[:2]
-    image = image[100:height-100, 100:width-100]
-    
-    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    
-    # Detect all faces
-    face_locations = face_recognition.face_locations(
-        rgb_image,
-        number_of_times_to_upsample=upsample,
-        model=model
-    )
-    
+    # 1. Load the model
+    model = YOLO(model_path)  # Load your trained YOLO face model
+
+    # 2. Load and crop the image
+    original_image = cv2.imread(image_path)
+    if original_image is None:
+        raise ValueError(f"Failed to load image from {image_path}")
+
+    image = original_image.copy()
+
+    # 3. Run YOLO prediction
+    #    (Ultralytics YOLO automatically handles the resizing,
+    #     but you can pass arguments like 'conf=0.25' if needed)
+    #    Note: YOLO expects the image in RGB format, so convert as appropriate.
+    #    However, passing BGR (as read by cv2) typically still works, but for
+    #    best practice we do explicit conversion.
+    results = model.predict(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+
+    # 4. Extract face bounding boxes from results
+    #    YOLO v8 returns a list of Results objects; for a single image, it's results[0].
+    #    Each 'box' has .xyxy, .conf, .cls, etc.
+    face_locations = []
+    if len(results) > 0 and results[0].boxes is not None:
+        for box in results[0].boxes:
+            # box.xyxy[0] -> [x1, y1, x2, y2]
+            x1, y1, x2, y2 = box.xyxy[0].tolist()
+            # Convert float coords to int
+            x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+
+            # YOLO boxes are (x1, y1, x2, y2)
+            # but original code used (top, right, bottom, left)
+            top, right, bottom, left = y1, x2, y2, x1
+            face_locations.append((top, right, bottom, left))
+
     # If no faces found, return None
     if not face_locations:
         return None, image, None
-    
-    # Sort faces by area (largest to smallest)
-    sorted_faces = sorted(face_locations, 
-                         key=lambda face: (face[2] - face[0]) * (face[1] - face[3]),
-                         reverse=True)
-    
-    # Get the two largest faces (or just one if that's all we have)
-    primary_faces = sorted_faces[:2]
-    
-    # Create annotated image and crop the face regions
-    annotated_image = image.copy()
-    cropped_faces = []
-    padding = 120
-    
-    for face in primary_faces:
-        top, right, bottom, left = face
-        
-        # Add padding to the bounding box
-        padded_top = max(0, top - padding)
-        padded_right = min(annotated_image.shape[1], right + padding)
-        padded_bottom = min(annotated_image.shape[0], bottom + padding)
-        padded_left = max(0, left - padding)
-        
-        cropped_face = image[padded_top:padded_bottom, padded_left:padded_right]
-        cropped_faces.append(cropped_face)
-        
-        cv2.rectangle(annotated_image, (padded_left, padded_top), 
-                     (padded_right, padded_bottom), (0, 255, 0), 2)
-    
-    # id_card_image = None
-    # # Create additional wide crop of second face if it exists
-    # if len(primary_faces) > 1:
-    #     face = primary_faces[1]
-    #     top, right, bottom, left = face
-    #     wide_padding_h = 700  # horizontal padding
-    #     wide_padding_v = 300  # vertical padding
-        
-    #     # Add increased padding to the bounding box
-    #     wide_top = max(0, top - wide_padding_v)
-    #     wide_right = min(annotated_image.shape[1], right + wide_padding_h)
-    #     wide_bottom = min(annotated_image.shape[0], bottom + wide_padding_v)
-    #     wide_left = max(0, left - wide_padding_h)
-        
-    #     id_card_image = image[wide_top:wide_bottom, wide_left:wide_right]
-    #     # Save the wide cropped face separately
-    #     base_name = image_path.split('/')[-1]
-    #     wide_cropped_path = "wide_cropped_" + base_name
-    #     cv2.imwrite(wide_cropped_path, cv2.cvtColor(id_card_image, cv2.COLOR_RGB2BGR))
-    #     print(f"Wide cropped face saved to {wide_cropped_path}")
 
-    return primary_faces, annotated_image, cropped_faces
+    # 5. Find the largest face by area
+    largest_face = max(
+        face_locations,
+        key=lambda face: (face[2] - face[0]) * (face[1] - face[3])
+    )
+
+    # 6. Create annotated image and crop the face region
+    annotated_image = image.copy()
+    padding = 120
+
+    top, right, bottom, left = largest_face
+    # Add padding to the bounding box
+    padded_top = max(0, top - padding)
+    padded_right = min(annotated_image.shape[1], right + padding)
+    padded_bottom = min(annotated_image.shape[0], bottom + padding)
+    padded_left = max(0, left - padding)
+
+    cropped_face = image[padded_top:padded_bottom, padded_left:padded_right]
+
+    # Draw rectangle on annotated image
+    cv2.rectangle(
+        annotated_image,
+        (padded_left, padded_top),
+        (padded_right, padded_bottom),
+        (0, 255, 0),
+        2,
+    )
+
+    # Return same structure as before but with single face
+    return largest_face, annotated_image, cropped_face
+
 
 if __name__ == "__main__":
-    image_path = "uploads/20250216_023657.jpg"
+    image_path = "uploads/IMG_1173.jpeg"
     # image_path = "ID_Images/IMG_9276.jpg"
-    primary_faces, annotated_image, cropped_faces = detect_primary_faces(image_path)
-    
+    largest_face, annotated_image, cropped_face = detect_primary_faces_yolo(image_path)
+
     # Save the annotated image regardless of face detection
-    base_name = image_path.split('/')[-1]
+    base_name = image_path.split("/")[-1]
     annotated_path = "annotated_" + base_name
-    cv2.imwrite(annotated_path, cv2.cvtColor(annotated_image, cv2.COLOR_RGB2BGR))
+    cv2.imwrite(annotated_path, annotated_image)
     print(f"Annotated image saved to {annotated_path}")
-    
-    if primary_faces:
-        # Save each cropped face with a different index
-        for i, face in enumerate(cropped_faces):
-            cropped_path = f"cropped_{i+1}_" + base_name
-            cv2.imwrite(cropped_path, cv2.cvtColor(face, cv2.COLOR_RGB2BGR))
-            print(f"Face {i+1} saved to {cropped_path}")
+
+    if largest_face:
+        # Save the cropped face
+        cropped_path = "cropped_" + base_name
+        cv2.imwrite(cropped_path, cropped_face)
+        print(f"Face saved to {cropped_path}")
     else:
+        print("No faces detected in the image")
         print("No faces detected in the image")
