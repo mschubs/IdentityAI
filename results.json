@@ -1,6 +1,5 @@
 {
-  "REASONING": "Multiple mismatches: ['name', 'dob', 'address']. The data is contradictory.",
+  "REASONING": "Found 1 mismatched fields: {'name': 'verified', 'dob': 'verified', 'address': 'mismatch', 'face': 'verified'}",
   "ACTION": "FINAL_INVALID",
-  "REQUEST_QUERY": "",
-  "CONFIDENCE_LEVEL": "low"
+  "CONFIDENCE_LEVEL": "medium"
 }

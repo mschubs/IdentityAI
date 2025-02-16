@@ -2,35 +2,24 @@ import os
 import json
 from typing import Dict, Any
 from dotenv import load_dotenv
-from groq import Groq
+from openai import OpenAI
 import datetime
 
-deepseek_model = "deepseek-r1-distill-llama-70b"
-llama_model = "llama-3.3-70b-versatile"
+deepseek_model = "gpt-4o"
+llama_model = "gpt-4o"
 
-# We'll redefine this prompt so the DecisionAgent can request more data explicitly:
+# Simplified prompt that doesn't allow requesting more data
 system_prompt = """
 You are deciding if the ID is valid or not, based on:
  - ID Data (NAME, ADDRESS, DOB)
  - Face similarity
- - OSINT data about the same fields (NAME, ADDRESS, DOB) which may be partial or incomplete
-
-**We only have, and only care about, the following data fields**:
- - Name (Full Name)
- - Address
- - Date of Birth
- - Face image
-
-You may request more data outside of these four fields, but you cannot guarantee it will be provided. Further, it is generally not necessary, as to confirm a valid match, we only need to match the four fields above.
-
-**You may request more data** if the OSINT data is insufficient. But only request clarifications or additional checks on NAME, ADDRESS, or DATE OF BIRTH.
+ - OSINT data about the same fields (NAME, ADDRESS, DOB)
 
 Return only valid JSON with the following fields:
 
 {
   "REASONING": "A short text explaining your reasoning.",
-  "ACTION": one of ["REQUEST_MORE_DATA", "FINAL_VALID", "FINAL_INVALID"],
-  "REQUEST_QUERY": "If ACTION=REQUEST_MORE_DATA, put a short query or direction for the OSINT agent here. Otherwise empty.",
+  "ACTION": one of ["FINAL_VALID", "FINAL_INVALID"],
   "CONFIDENCE_LEVEL": "One of [high, medium, low]"
 }
 
@@ -41,7 +30,6 @@ Criteria for validity:
 
 If the data is definitely contradictory, declare FINAL_INVALID.
 If you are confident the ID is real, declare FINAL_VALID.
-If you need more data regarding the Name, Address, or DOB, set ACTION=REQUEST_MORE_DATA and fill in REQUEST_QUERY with the data you need from OSINT. Only request clarifications on Name, Address, or DOB. Do not request data about SSN, phone, or relatives.
 """
 
 
@@ -54,6 +42,7 @@ def create_chat_completion(content, model, client):
             }
         ],
         model=model,
+        temperature=0,
     )
 
 
@@ -72,39 +61,46 @@ def parse_dob(dob_str: str):
     return None
 
 
-def do_dobs_match(id_dob_str: str, osint_dob_str: str, osint_age_str: str = "") -> bool:
+def compare_dates_or_age(id_dob_str: str, osint_dob_str: str, osint_age_str: str = "") -> str:
     """
-    1) If OSINT has a DOB string, parse both and check exact match.
-    2) If OSINT lacks DOB but has an age, compare approximate age.
+    Returns one of ["mismatch", "verified", "unknown"].
+
+    1) If OSINT has a DOB string, parse both and check exact match => verified or mismatch.
+    2) Else if OSINT only has an age, check approximate => verified or mismatch.
+    3) If OSINT is missing DOB & age => unknown.
     """
+    id_date = parse_dob(id_dob_str)
+
+    # If we have an OSINT DOB string
     if osint_dob_str:
-        id_date = parse_dob(id_dob_str)
         osint_date = parse_dob(osint_dob_str)
         if id_date and osint_date:
-            return id_date == osint_date
-        return False
+            return "verified" if (id_date == osint_date) else "mismatch"
+        else:
+            # OSINT had a DOB, but we cannot parse it or the ID's. It's effectively mismatch or unknown.
+            return "mismatch" if id_date else "unknown"
 
-    # If no OSINT DOB string but there's an OSINT age
-    if osint_age_str:
+    # If we have no OSINT DOB string, but possibly have an age
+    elif osint_age_str:
         try:
             osint_age = int(osint_age_str)
-        except:
+        except ValueError:
             osint_age = None
-        if not osint_age:
-            return False
-
-        id_date = parse_dob(id_dob_str)
-        if not id_date:
-            return False
-
-        # Compare approximate age
-        current_year = datetime.date.today().year
-        possible_age = current_year - id_date.year
-        # If we're within a year or two, call it good
-        return abs(possible_age - osint_age) <= 2
+        
+        if id_date and osint_age:
+            current_year = datetime.date.today().year
+            possible_age = current_year - id_date.year
+            # If we're within ~2 years, call it "verified"
+            if abs(possible_age - osint_age) <= 2:
+                return "verified"
+            else:
+                return "mismatch"
+        else:
+            # We have an age, but can't parse ID DOB or the age is invalid => unknown or mismatch
+            return "unknown" if not id_date else "mismatch"
 
     # If there's absolutely no OSINT DOB or age
-    return False
+    return "unknown"
 
 
 class DecisionAgent:
@@ -114,75 +110,102 @@ class DecisionAgent:
     """
     def __init__(self):
         load_dotenv('secret.env')  # Load variables from .env
-        self.client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        # Instead of booleans, store "status": in ["verified", "mismatch", "unknown"]
         self.verification_state = {
-            "name": {"verified": False, "confidence": None},
-            "address": {"verified": False, "confidence": None},
-            "dob": {"verified": False, "confidence": None},
-            "face": {"verified": False, "confidence": None}
+            "name": {"status": "unknown", "confidence": None},
+            "address": {"status": "unknown", "confidence": None},
+            "dob": {"status": "unknown", "confidence": None},
+            "face": {"status": "unknown", "confidence": None}
         }
-        self.decision_history = []  # Store previous decisions and reasoning
 
     def update_verification_state(self, id_data, face_similarity, osint_data):
         """Updates the verification state based on current data"""
 
-        # 1) Face verification
-        self.verification_state["face"] = {
-            "verified": face_similarity >= 0.7,
-            "confidence": face_similarity
-        }
+        # Face verification: either verified or mismatch. 
+        # If face_similarity is < 0.7, that is mismatch if we do have a face comparison.
+        # If we have no face image at all, you could call it unknown, but presumably we do.
+        if face_similarity >= 0.7:
+            self.verification_state["face"] = {
+                "status": "verified",
+                "confidence": face_similarity
+            }
+        else:
+            # If face_similarity is 0 => mismatch
+            # if it's  -1 => maybe unknown if face wasn't recognized, etc. 
+            # But let's keep it simple:
+            self.verification_state["face"] = {
+                "status": "mismatch",
+                "confidence": face_similarity
+            }
 
-        # 2) Compare Name
+        # Compare Name
         id_name = id_data.get("name", "").strip().lower()
         osint_name = osint_data.get("person_info", {}).get("full_name", "").strip().lower()
-        name_verified = (id_name == osint_name) if (id_name and osint_name) else False
 
-        self.verification_state["name"] = {
-            "verified": name_verified,
-            "confidence": "high" if name_verified else "low"
-        }
+        if not id_name:
+            # If the ID didn't have a name for some reason, call it unknown
+            self.verification_state["name"] = {"status": "unknown", "confidence": None}
+        else:
+            if not osint_name:
+                # OSINT had no name => unknown
+                self.verification_state["name"] = {"status": "unknown", "confidence": None}
+            else:
+                # We have both names
+                if id_name == osint_name:
+                    self.verification_state["name"] = {"status": "verified", "confidence": "high"}
+                else:
+                    self.verification_state["name"] = {"status": "mismatch", "confidence": "low"}
 
-        # 3) Compare DOB
+        # Compare DOB
         id_dob_str = id_data.get("dateOfBirth", "")
-        # OSINT might have date_of_birth or might just have 'age'
         osint_dob_str = osint_data.get("person_info", {}).get("date_of_birth", "")
         osint_age_str = osint_data.get("person_info", {}).get("age", "")
 
-        dob_verified = do_dobs_match(id_dob_str, osint_dob_str, osint_age_str)
+        dob_status = compare_dates_or_age(id_dob_str, osint_dob_str, osint_age_str)
+        # You might want a confidence measure, e.g. "high" if verified, else "low"
         self.verification_state["dob"] = {
-            "verified": dob_verified,
-            "confidence": "high" if dob_verified else "low"
+            "status": dob_status,
+            "confidence": "high" if dob_status == "verified" else "low"
         }
 
-        # 4) Compare address
-        # Build the ID's full address
+        # Compare Address
         id_address = (
             (id_data.get("address-line-1","") + " " + id_data.get("address-line-2",""))
             .strip()
             .lower()
         )
-
-        # OSINT might have multiple addresses
         addresses = osint_data.get("addresses", [])
-        address_verified = False
-        for addr in addresses:
-            full_osint_addr = (
-                addr.get("address","") + " " +
-                addr.get("city","") + " " +
-                addr.get("state","") + " " +
-                addr.get("zip","")
-            ).strip().lower()
-            # Simple substring check
-            if id_address and full_osint_addr and (
-                id_address in full_osint_addr or full_osint_addr in id_address
-            ):
-                address_verified = True
-                break
 
-        self.verification_state["address"] = {
-            "verified": address_verified,
-            "confidence": "high" if address_verified else "low"
-        }
+        if not id_address:
+            self.verification_state["address"] = {"status": "unknown", "confidence": None}
+        else:
+            # We'll see if we find a match in OSINT
+            found_match = False
+            has_any_osint_address = False
+            for addr in addresses:
+                has_any_osint_address = True
+                full_osint_addr = (
+                    addr.get("address","") + " " +
+                    addr.get("city","") + " " +
+                    addr.get("state","") + " " +
+                    addr.get("zip","")
+                ).strip().lower()
+                if full_osint_addr and (
+                    id_address in full_osint_addr or full_osint_addr in id_address
+                ):
+                    found_match = True
+                    break
+            
+            if not has_any_osint_address:
+                # No addresses in OSINT => unknown
+                self.verification_state["address"] = {"status": "unknown", "confidence": None}
+            else:
+                if found_match:
+                    self.verification_state["address"] = {"status": "verified", "confidence": "high"}
+                else:
+                    self.verification_state["address"] = {"status": "mismatch", "confidence": "low"}
 
     def make_final_decision(
         self, 
@@ -191,98 +214,69 @@ class DecisionAgent:
         osint_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Aggregates sub-agent results and returns a JSON with decision:
+        Return JSON with:
           - REASONING
-          - ACTION: "REQUEST_MORE_DATA" | "FINAL_VALID" | "FINAL_INVALID"
-          - REQUEST_QUERY (if more data needed)
+          - ACTION: "FINAL_VALID" | "FINAL_INVALID"
           - CONFIDENCE_LEVEL
         """
         self.update_verification_state(id_data, face_similarity, osint_data)
 
-        # Do a quick check for multiple mismatches or a direct contradiction
-        mismatches = []
-        for field in ["name","dob","address","face"]:
-            if not self.verification_state[field]["verified"]:
-                mismatches.append(field)
+        # Tally statuses
+        statuses = {f: self.verification_state[f]["status"] for f in ["name","dob","address","face"]}
+        mismatch_count = sum(1 for s in statuses.values() if s == "mismatch")
+        verified_count = sum(1 for s in statuses.values() if s == "verified")
+        unknown_count = sum(1 for s in statuses.values() if s == "unknown")
 
-        # If we have multiple mismatches, let's short-circuit
-        if len(mismatches) > 1:
-            # Direct contradiction: we can finalize invalid
+        # Make immediate decision if clear criteria are met
+        if mismatch_count >= 1:
             return {
-                "REASONING": f"Multiple mismatches: {mismatches}. The data is contradictory.",
+                "REASONING": f"Found {mismatch_count} mismatched fields: {statuses}",
                 "ACTION": "FINAL_INVALID",
-                "REQUEST_QUERY": "",
-                "CONFIDENCE_LEVEL": "low"
+                "CONFIDENCE_LEVEL": "high" if mismatch_count >= 2 else "medium"
             }
 
-        # If everything is verified
-        all_verified = all(self.verification_state[f]["verified"] for f in ["name","dob","address","face"])
-        if all_verified:
+        if verified_count == 4:
             return {
-                "REASONING": "All data matches across ID, face, and OSINT. Confident valid.",
+                "REASONING": "All fields verified successfully",
                 "ACTION": "FINAL_VALID",
-                "REQUEST_QUERY": "",
                 "CONFIDENCE_LEVEL": "high"
             }
 
-        # If exactly one mismatch, the LLM prompt might want to do one more pass
-        # But let's see if we want to yield to the LLM or do a direct approach
-        # We'll continue letting the LLM attempt to form a final answer, but we supply the context
-        decision_history_text = "\n".join([
-            f"Iteration {i+1}:"
-            f"\nAction: {decision['ACTION']}"
-            f"\nReasoning: {decision['REASONING']}"
-            f"\nQuery: {decision['REQUEST_QUERY']}"
-            f"\nConfidence: {decision['CONFIDENCE_LEVEL']}\n"
-            for i, decision in enumerate(self.decision_history)
-        ])
-
+        # For ambiguous cases, let the LLM make the final call
         content = f"""
         ID Data: {id_data}
         Face Similarity: {face_similarity}
         OSINT Data: {osint_data}
         Current Verification State: {json.dumps(self.verification_state, indent=2)}
 
-        Previous Decisions:
-        {decision_history_text if self.decision_history else "No previous decisions."}
+        Make a final decision based on all available data.
+        Fields verified: {verified_count}
+        Fields unknown: {unknown_count}
+        Fields mismatched: {mismatch_count}
 
-        Now follow the instructions:
         {system_prompt}
         """
 
         chat_completion = create_chat_completion(content, llama_model, self.client)
         response_text = chat_completion.choices[0].message.content.strip()
-        print("Raw DecisionAgent response:\n", response_text)
+        cleaned_response = response_text.replace("```json", "").replace("```", "").strip()
 
-        # Clean and parse the response
-        cleaned_response = (
-            response_text
-            .replace("```json", "")
-            .replace("```", "")
-            .strip()
-        )
         try:
-            decision_output = json.loads(cleaned_response)
-            # Store this decision in history
-            self.decision_history.append(decision_output)
+            return json.loads(cleaned_response)
         except json.JSONDecodeError as e:
             print(f"JSON parsing error: {e}")
-            decision_output = {
-                "REASONING": "Could not parse LLM output; defaulting to invalid or uncertain.",
+            # Default to invalid if we can't parse the LLM response
+            return {
+                "REASONING": "Error parsing decision. Defaulting to invalid due to uncertainty.",
                 "ACTION": "FINAL_INVALID",
-                "REQUEST_QUERY": "",
-                "CONFIDENCE_LEVEL": "low",
+                "CONFIDENCE_LEVEL": "low"
             }
-            self.decision_history.append(decision_output)
-
-        return decision_output
 
     def reset(self):
         """Reset the agent's state for a new verification"""
         self.verification_state = {
-            "name": {"verified": False, "confidence": None},
-            "address": {"verified": False, "confidence": None},
-            "dob": {"verified": False, "confidence": None},
-            "face": {"verified": False, "confidence": None}
+            "name": {"status": "unknown", "confidence": None},
+            "address": {"status": "unknown", "confidence": None},
+            "dob": {"status": "unknown", "confidence": None},
+            "face": {"status": "unknown", "confidence": None}
         }
-        self.decision_history = []

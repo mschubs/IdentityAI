@@ -3,7 +3,7 @@ import time
 import random
 from typing import Dict, Any, Optional
 
-from groq import Groq
+from openai import OpenAI
 
 
 # from openpyxl import load_workbook
@@ -133,115 +133,72 @@ class OSINTAgent:
             print(f"Raw response: {response.text}")
             return {"error": "Invalid JSON response"}
     
-    def choose_best_function(self, query: str) -> str:
+    def choose_best_function(self, query: str, attempted_tools: Optional[list] = None) -> str:
         """
-        Chooses the best function to use based on the query by sending a GROQ query.
-        It then calls the appropriate function (fast people search or Sonar API) and
-        returns the result of that function.
+        Decides which OSINT tool to use based on the query and which tools have already been attempted.
+        Returns a JSON string that includes the tool used and its result.
         """
-        groq_prompt = '''
-        You are an assistant tasked with selecting the most appropriate API function based on the user's query. There are two functions available:
-        1. **Person Search ("person")**:  
-        - Use this function when the query appears to be asking for information about a specific person.  
-        - The query may include personal details such as a person's name, and optionally an address.  
-        - When using the person search function, extract:
-            - `firstName`: The person's first name.
-            - `lastName`: The person's last name.
-            - Optionally, if an address is mentioned, include `address`.
+        if attempted_tools is None:
+            attempted_tools = []
+
+        # Include the history in your OpenAI prompt so it can choose a tool not already attempted.
+        prompt = f'''
+        You are an assistant tasked with selecting the most appropriate OSINT API function based on the user's query.
+        Available functions:
+        1. Person Search ("person") - good for queries with specific names and addresses.
+        2. Sonar Query ("sonar") - good for general or vague queries.
         
-        2. **Sonar Query ("sonar")**:  
-        - Use this function for general queries that do not require person-specific parameters or more vague questions of a person.  
-        - In this case, choose an appropriate query for the Sonar API.
-
-        Return your decision as a JSON object in one of the following formats:
-
-        **Example for Person Search (with address):**
-        {{
-        "function": "person",
-        "parameters": {{
-            "firstName": "John",
-            "lastName": "Doe",
-            "address": "123 Elm Street"
-        }}
-        }}
-
-        **Example for Person Search (without address):**
-        {{
-        "function": "person",
-        "parameters": {{
-            "firstName": "John",
-            "lastName": "Doe"
-        }}
-        }}
-
-        **Example for Sonar Query:**
-        {{
-        "function": "sonar",
-        "parameters": {{
-            "query": "Who is John Doe?"
-        }}
-        }}
-
-        Even if the query does not explicitly mention "person search," use the context and details provided (such as names or addresses) to decide if the person search function should be used. If not, default to the sonar function.
-
-        Here are the previous fast people queries (to avoid duplicates):
-        {previous_queries}
-
-        Please output only the JSON object without any additional text or formatting.
-
+        Tools already attempted: {attempted_tools}.
+        
+        Return your decision as a JSON object, for example:
+        {{"function": "person", "parameters": {{"firstName": "John", "lastName": "Doe", "address": "123 Elm Street"}}}}
+        or
+        {{"function": "sonar", "parameters": {{"query": "Who is John Doe?"}}}}
+        
         The input query is: "{query}"
+        Output only valid JSON.
         '''
-
-        groq_prompt = groq_prompt.format(query=query, previous_queries=json.dumps(self.previous_fastpeople_queries))
-
-        # Instantiate the Groq client using the API key from environment variables.
-        client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
         
-        # Send the prompt as a chat message to Groq.
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
         chat_completion = client.chat.completions.create(
-            messages=[
-                {"role": "user", "content": groq_prompt}
-            ],
-            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            model="gpt-4o",
         )
         
-        # Extract and parse the Groq response.
         response_content = chat_completion.choices[0].message.content
         try:
             groq_response = json.loads(response_content)
         except json.JSONDecodeError:
-            # Fallback to simple matching if JSON parsing fails.
-            print("JSON parsing failed")
-            if "person search" in query.lower():
-                groq_response = {
-                    "function": "person",
-                    "parameters": {
-                        "firstName": query.split()[0],
-                        "lastName": query.split()[1] if len(query.split()) > 1 else ""
-                    }
-                }
+            # Fallback: if JSON parsing fails, default to sonar if person was attempted.
+            if "person" in attempted_tools:
+                groq_response = {"function": "sonar", "parameters": {"query": query}}
             else:
-                groq_response = {
-                    "function": "sonar",
-                    "parameters": {"query": query}
-                }
-    
-        print("Groq response:", groq_response)
-
-        # Decide which function to call based on the Groq response.
-        if groq_response.get("function") == "person":
-            print("Running fast people search")
-            params = groq_response.get("parameters", {})
-            result = self.run_fastpeople(params)
-            print(f"Result for method person: {result}")
+                groq_response = {"function": "person", "parameters": {"firstName": query.split()[0], "lastName": query.split()[-1]}}
+        
+        function_name = groq_response.get("function", "sonar")
+        parameters = groq_response.get("parameters", {})
+        
+        # Run the selected function
+        if function_name == "person":
+            result_raw = self.run_fastpeople(parameters)
+            try:
+                result_dict = json.loads(result_raw)
+            except json.JSONDecodeError:
+                result_dict = {"error": "Failed to parse FastPeople response", "rawResponse": result_raw}
         else:
-            print("Running Sonar API")
-            sonar_query = groq_response.get("parameters", {}).get("query", query)
-            result = self.run_sonar_query(sonar_query)
-            print(f"Result for method Sonar: {result}")
-        return result
-
-
+            result_dict = self.run_sonar_query(parameters.get("query", query))
+        
+        final_result = {
+            "functionCalled": function_name,
+            "useful": isinstance(result_dict, dict) and not result_dict.get("error"),
+            "error": result_dict.get("error", "") if isinstance(result_dict, dict) else "",
+            "data": result_dict
+        }
+        
+        # Return result along with the tool name, so the orchestrator can record it.
+        result_with_tool = {"tool": function_name, "result": final_result}
+        return json.dumps(result_with_tool)
+    
     # Not Used
     def run_osint_checks(
         self, 

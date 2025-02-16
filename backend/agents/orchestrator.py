@@ -22,7 +22,7 @@ def split_name(full_name):
         return parts[0], "", ""
     elif len(parts) == 2:  # First and last name
         return parts[0], "", parts[1]
-    else:  # e.g., First, middle, last
+    else:  # e.g., First, Middle, Last
         return parts[0], " ".join(parts[1:-1]), parts[-1]
 
 class OrchestratorAgent:
@@ -100,9 +100,8 @@ class OrchestratorAgent:
 
     async def run_verification(self) -> Dict[str, Any]:
         """
-        Runs the entire identity verification pipeline asynchronously,
-        including a decision loop until we have a final decision or
-        we reach a maximum iteration limit.
+        Runs the entire identity verification pipeline asynchronously, using multiple OSINT tools
+        in a single pass, then makes a final decision.
         """
         print("urls: ", self.license_image_url, self.face_image_url)
         
@@ -135,7 +134,8 @@ class OrchestratorAgent:
         shutil.copy(cropped_face_image_path, f"dashboard/public/{os.path.basename(cropped_face_image_path)}")
         print("Copied images to dashboard/public:", cropped_ID_image_path, cropped_face_image_path)
 
-        # Step 3: Initial OSINT (fastpeople) - you might do more if needed
+        # Step 3: OSINT calls
+        # Run FastPeople and Sonar queries in parallel
         fast_people_future = asyncio.to_thread(
             self.osint_agent.run_fastpeople,
             {
@@ -146,98 +146,67 @@ class OrchestratorAgent:
             }
         )
 
-        # Gather face similarity & initial OSINT
-        self.face_similarity, self.fast_people_results = await asyncio.gather(
-            face_verification_future, 
-            fast_people_future
+        sonar_query = f"Verify name '{name}' and date of birth '{dateOfBirth}' using public records"
+        sonar_future = asyncio.to_thread(
+            self.osint_agent.run_sonar_query,
+            sonar_query
         )
 
+        # Gather all async results in parallel
+        self.face_similarity, fast_people_result, sonar_result = await asyncio.gather(
+            face_verification_future, 
+            fast_people_future,
+            sonar_future
+        )
+
+        # If we haven't collected reverse_image results yet, wait for it
         if hasattr(self, 'reverse_image_future') and not self.reverse_image_agent_output:
-            # If we haven't collected reverse_image results yet, wait for it
             await self.reverse_image_future
 
-        # We'll store consolidated OSINT data in a dictionary. Let's start with fast_people_results:
+        # Consolidate OSINT data
         try:
-            osint_data = json.loads(self.fast_people_results)
+            fast_people_json = json.loads(fast_people_result)
         except:
-            osint_data = {"fastPeople": self.fast_people_results}
+            fast_people_json = {"rawResponse": fast_people_result}
 
-        # Step 4: Decision Loop
-        max_iterations = 2
-        iteration = 0
-        final_result = None
+        osint_data = {
+            "person_info": {  # Restructured to match decision agent's expected format
+                "full_name": name,
+                "date_of_birth": dateOfBirth,
+                "age": fast_people_json.get("age", "")
+            },
+            "addresses": [
+                {
+                    "address": address1,
+                    "city": "",  # These could be parsed from address2 if needed
+                    "state": "",
+                    "zip": address2
+                }
+            ],
+            "fastPeople": fast_people_json,
+            "sonar": sonar_result,
+            "reverseImage": self.reverse_image_agent_output or {}
+        }
 
-        # Keep track of last REQUEST_QUERY to detect repeats
-        last_query = None
-
-        while iteration < max_iterations:
-            iteration += 1
-            print(f"Decision iteration #{iteration}...")
-
-            decision_output = self.decision_agent.make_final_decision(
-                id_data=observed_data,
-                face_similarity=self.face_similarity,
-                osint_data=osint_data
-            )
-
-            action = decision_output.get("ACTION", "FINAL_INVALID")
-            if action == "REQUEST_MORE_DATA":
-                query_for_osint = decision_output.get("REQUEST_QUERY", "")
-                if not query_for_osint:
-                    # If we have no query, break to avoid infinite loop
-                    print("DecisionAgent requested more data but provided no query. Stopping.")
-                    final_result = decision_output
-                    break
-
-                # If the same query is repeated, we assume no further resolution
-                if query_for_osint == last_query:
-                    print("DecisionAgent repeated the same OSINT query. Stopping.")
-                    final_result = {
-                        "REASONING": "Repeated the same OSINT request with no resolution.",
-                        "ACTION": "FINAL_INVALID",
-                        "REQUEST_QUERY": "",
-                        "CONFIDENCE_LEVEL": "low"
-                    }
-                    break
-
-                last_query = query_for_osint
-                print("DecisionAgent requests more data with query:", query_for_osint)
-
-                # Re-invoke OSINT with the new query
-                new_osint_result = self.osint_agent.choose_best_function(query_for_osint)
-
-                # Attempt to parse as JSON (depends on what the OSINT function returns)
-                try:
-                    new_osint_result_json = json.loads(new_osint_result)
-                except:
-                    new_osint_result_json = {"additional": new_osint_result}
-
-                # Merge new OSINT data into our existing `osint_data` under a new key
-                osint_data[f"iteration_{iteration}_extra"] = new_osint_result_json
-
-            else:
-                # We have a final decision: either FINAL_VALID or FINAL_INVALID
-                final_result = decision_output
-                break
-
-        if not final_result:
-            # If we never got a final result, we can set a fallback
-            final_result = {
-                "REASONING": "Max iterations reached, no conclusive result.",
-                "ACTION": "FINAL_INVALID",
-                "REQUEST_QUERY": "",
-                "CONFIDENCE_LEVEL": "low",
-            }
+        # Step 4: Make final decision with all available data
+        final_result = self.decision_agent.make_final_decision(
+            id_data=observed_data,
+            face_similarity=self.face_similarity,
+            osint_data=osint_data
+        )
 
         # Step 5: Persist results
         with open("results.json", "w") as f:
             json.dump(final_result, f, indent=2)
 
-        # Step 6: Reset everything to accept next user
+        # Step 6: Reset everything to accept the next user
         self.reset()
         return final_result
 
 
+# ------------------
+# Example usage:
+# ------------------
 async def process_images():
     document_parser = DocumentParsingAgent()
     reverse_image_agent = ReverseImageAgent()
