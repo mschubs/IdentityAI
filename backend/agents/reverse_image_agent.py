@@ -309,7 +309,7 @@ class ReverseImageAgent:
 
         return results
     
-    def scrape_urls(self, urls):
+    def scrape_urls(self, urls, id_name):
         futures = []
         markdown = []
         time_start = time.time()
@@ -330,8 +330,7 @@ class ReverseImageAgent:
         # result = run_groq(content, "mixtral-8x7b-32768", self.client)
         chat_completion = self.client.messages.create(
                 temperature=0,
-                system="""
-                You will be passed data in the form of a list of webpages in markdown format. If the webpages contain information about Nandan Srikrishna, please return this name and any information abou them on these webpages in a json format. If the websites do not mention Nandan Srikrishna, please return an empty json object. Denote the json object to start with `json` and end with ````""",
+                system=f'You will be passed data in the form of a list of webpages in markdown format. If the webpages contain information about {id_name}, please return this name and any information abou them on these webpages in a json format. If the websites do not mention{id_name}, please return an empty json object. Denote the json object to start with `json` and end with ````',
             messages=[
                 {
                     "role": "user",
@@ -370,7 +369,7 @@ class ReverseImageAgent:
             print(f"Error scraping url: {e}", flush=True)
             return None
 
-    def run(self, image_path):
+    def run(self, image_path, id_name):
         """
         Orchestrates the entire flow: 
         1) Load Pimeyes, add cookies, refresh. 
@@ -405,14 +404,19 @@ class ReverseImageAgent:
         time_end = time.time()
         print(f"Time to get pimeyes url results: {time_end - time_start} seconds")
 
-        urls, result = self.scrape_urls(urls)
+        urls, result = self.scrape_urls(urls, id_name)
+
+        # Save URLs to JSON file
+        with open('urls.json', 'w') as f:
+            json.dump(urls, f, indent=4)
+
         print(result)
         return result
 # from my_pimeyes_scraper import PimeyesScraper
 
-def do_reverse_search(image_path):
+def do_reverse_search(image_path, id_name):
     scraper = ReverseImageAgent()
-    data = scraper.run(image_path)
+    data = scraper.run(image_path, id_name)
     # do something with 'data'
     return data
 
