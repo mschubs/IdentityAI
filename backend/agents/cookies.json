@@ -11,44 +11,5 @@
         "session": false,
         "storeId": null,
         "value": "eyJpdiI6InhzTXdDN0E2Si9HUFlmZVJnZ3hQREE9PSIsInZhbHVlIjoiLys0eTd0RXl2REhDdFZ4NWx4eloxbzdoMUQ3VzMweHVRZ0pIYVJDdy9DK0RJZTFFYjlaVFpXNGVOOVNqeW5yaFZlM2Yzd1B3RnZoa1NUeG5yNjNaRnVUcVVVa0dISHN4d2NPOVV1MDQ2R0NielR3RDFWK2FBTE1BMDNxSVg4Mzk2Y0J4NXAxRmhKbDJVa0s5cElGRWhkYzBRdzFtbDlRNW4yaG1KamZFOUFXZlpSS1FlbkZ4Q3U2TVpQMXN1MXFpVTFDNisvUVNvRzhDNldCdmNYUUc4eTR4T0hpdjM4M2Jmd1QyNnJZNDkvVT0iLCJtYWMiOiJlNzM2ZjUzYjg0NmVlODVhNDE0MDE1Nzg5Mjc0MDM1YjdjMDIzNzg5MmQ4NTI3NDAzMjI1N2RkNjg2NzRjNzZlIiwidGFnIjoiIn0%3D"
-    },
-    {
-        "domain": "pimeyes.com",
-        "expirationDate": 1771144469.462008,
-        "hostOnly": true,
-        "httpOnly": false,
-        "name": "payment_gateway_v3",
-        "path": "/",
-        "sameSite": "lax",
-        "secure": true,
-        "session": false,
-        "storeId": null,
-        "value": "fastspring"
-    },
-    {
-        "domain": "pimeyes.com",
-        "expirationDate": 1739726028.234099,
-        "hostOnly": true,
-        "httpOnly": true,
-        "name": "pimeyes_session",
-        "path": "/",
-        "sameSite": "no_restriction",
-        "secure": true,
-        "session": false,
-        "storeId": null,
-        "value": "eyJpdiI6ImVQdno2bHIrdms3cVVZVUszK1hXU0E9PSIsInZhbHVlIjoia0R1WWNYcUZEaUpXSjUyQUVmQVVoYVhtVGNKeTdjbnZscXZ1alZDaGlzSGppdnFJNVpaeHVKd0N4UjN4Mnh3bkd0VTZZRzFDYWp0Lzl2NUhqWk10WFpvYVRtNmN1cmVCL09zcVMvN1U4cHBlZmpvSWRKL3JCYnVKdUtYVVU0RnYiLCJtYWMiOiJmZWIwOThiODExNjMyZjM4OGY1NTkyZjdlNmY0NjUzN2ZhN2NlMGQzMzliZjI4M2MyZjNkNzc2ODkxMzgxOTJmIiwidGFnIjoiIn0%3D"
-    },
-    {
-        "domain": "pimeyes.com",
-        "expirationDate": 1739726028.234146,
-        "hostOnly": true,
-        "httpOnly": true,
-        "name": "wyIgzC36HRAHajIPGOPp7msQGjezGuceRsrLlhfM",
-        "path": "/",
-        "sameSite": "no_restriction",
-        "secure": true,
-        "session": false,
-        "storeId": null,
-        "value": "eyJpdiI6ImczWTZzNlczS09wU3RqMlJzL0l3SEE9PSIsInZhbHVlIjoicWhkZnNYOFhaOTRreWd2cTUraGpiT0xncXdYUVhlOTB1RXdBdEdCUldsWFFNL25hem5la3Rrd1M1bFZuYURPS2NiaGp5aXFpaUkwSWZhcUNJaTYxMTZnSUwzQkloTnZxejJwaTBBUHN0RU1JWXVhb1lwc1BLRm1wd2JGOHUvaS9FWjFMVHNXdFlLYWtPN1ZRNExhbjk5dlNORGtGeGo3T3Y5L2VBalB0ZmxPbzlXcVRjMGs0ZEkwWC9SVmIvUk10cFBDRVByMWZuUHNvTk1aNDhzVzlnZmhsQ0d0Q2MxV0JXNnpQUTBnbkpFcHpUYlJDUHhDVGVocGxqTm1lUUJIMG1CTWoydFVIaDJOZkxQTTNuYzRyZDZtNFdRaUMyWDZ3bkRGQTQ2ZmlCTGhpVUdyckl0T3dEOTNDNm9rRmc5N0t2RStWNklZSWVodzJRQ1lNSGlWVy9aaE5wTCtaVU1Wb0htMFpWaGZHckJYd3AxWGZwMWRQVGlnYlRwbVJaVC8vRmcrRlNrN1VJRVNKY3RiMHBpRmQxZzlMOS9sRnJRN3duVWc0VkUyNm05R1lwS0hRZVdFQ0pvSEg5WStueWdPb044elUzUWo3cllMdGF4Q21NSWpJSXlnVVgzYnIyVTZUZXpGcVVLdVlxMW89IiwibWFjIjoiZDdmOTAxY2EzNDUyYzljOWM1ZWIxNmZiY2VhNjNhY2MyNTNlY2NmYjZjMTZjYzAyOTI0NDJhN2U4YTQ0YWU1NCIsInRhZyI6IiJ9"
     }
 ]

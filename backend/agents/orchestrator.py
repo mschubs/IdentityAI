@@ -124,7 +124,7 @@ class OrchestratorAgent:
         self.reverse_image_agent_output, urls = self.reverse_image_agent_output
         json_result["web_links"] = [{"url": url} for url in urls]
         
-        json_result["bio"] = self.reverse_image_agent_output["bio"]
+        json_result["bio"] = self.reverse_image_agent_output["bio"] if self.reverse_image_agent_output and "bio" in self.reverse_image_agent_output else "No generated bio ;("
                 
         # Add age calculation via LLM
         age_prompt = f"""Given today's date and a date of birth, calculate the person's current age.
@@ -214,8 +214,23 @@ class OrchestratorAgent:
         
 
         # Step 5: Persist results
+        try:
+            # Try to read existing data
+            print("Attempting to read existing data...")
+            with open("dashboard/src/data.json", "r") as f:
+                existing_data = json.load(f)
+                print("Current data:", existing_data)
+                existing_data["allData"].append(json_result)
+                print("After append:", existing_data)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            # If file doesn't exist or is invalid, create new data structure
+            print("Error reading file:", str(e))
+            existing_data = {"allData": [json_result]}
+        
+        # Write the combined data back to file
+        print("Writing data to file:", existing_data)
         with open("dashboard/src/data.json", "w") as f:
-            json.dump({"allData": [json_result]}, f, indent=2)
+            json.dump(existing_data, f, indent=2)
 
         # Step 6: Reset everything to accept the next user
         self.reset()

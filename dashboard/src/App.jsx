@@ -97,18 +97,17 @@ function App() {
     return score;
   };
 
-  const identityData =
-    allData.length > 0
-      ? {
-          ...allData[currentIDIndex],
-          online: [...allData[currentIDIndex].online].sort((a, b) => {
-            return (
-              getMatchScore(b, allData[currentIDIndex].observed) -
-              getMatchScore(a, allData[currentIDIndex].observed)
-            );
-          }),
-        }
-      : null;
+  const identityData = allData.length > 0 && allData[currentIDIndex] 
+    ? {
+        ...allData[currentIDIndex],
+        online: [...(allData[currentIDIndex].online || [])].sort((a, b) => {
+          return (
+            getMatchScore(b, allData[currentIDIndex].observed) -
+            getMatchScore(a, allData[currentIDIndex].observed)
+          );
+        }),
+      }
+    : null;
 
   useEffect(() => {
     if (allData.length > 0) {
@@ -173,9 +172,9 @@ function App() {
   }, [currentIDIndex]);
 
   const handleIdChange = (index) => {
-    if (index !== currentIDIndex) {
+    if (index !== currentIDIndex && allData[index]) {
       setCurrentIDIndex(index);
-      setCurrentIndex(allData[index].online.length - 1);
+      setCurrentIndex(allData[index]?.online?.length - 1 || 0);
       setIsLoading(true);
       setFaceSimilarityResult(null);
       setDialogOpen(false);

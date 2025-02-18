@@ -107,7 +107,11 @@ class ReverseImageAgent:
         """
         driver = self.driver
         try:
+            # Convert relative path to absolute path
+            absolute_path = os.path.abspath(path)
+            
             # Wait for upload button
+            time.sleep(1)
             upload_button = WebDriverWait(driver, 20).until(
                 EC.element_to_be_clickable((By.XPATH, '//*[@id="hero-section"]/div/div[1]/div/div/div[1]/button[2]'))
             )
@@ -119,7 +123,7 @@ class ReverseImageAgent:
             )
             
             time.sleep(random.uniform(1, 3))
-            file_input.send_keys(path)
+            file_input.send_keys(absolute_path)
             time.sleep(random.uniform(4, 5))
 
             # Wait for file to be processed - look for loading step to disappear
@@ -134,6 +138,7 @@ class ReverseImageAgent:
             submit_buttons = WebDriverWait(driver, 15).until(
                 EC.presence_of_all_elements_located((By.CSS_SELECTOR, "button[data-v-f20a56d6]"))
             )
+
             submit_button = submit_buttons[3]
             time.sleep(random.uniform(0.2, 1))
             # Wait for button to be clickable
@@ -158,6 +163,10 @@ class ReverseImageAgent:
         From the Pimeyes results page, navigate and extract each 'Open website' link
         by intercepting Pimeyes's window.open calls.
         """
+        if not url:
+            print("Error: No valid URL provided to get_results")
+            return []
+        
         driver = self.driver
         print(f"Starting get_results with URL: {url}")
         driver.get(url)
@@ -382,7 +391,7 @@ class ReverseImageAgent:
         self.futures = []
 
         self.driver.get(self.pimeyes_url)
-
+        print("test")
         # Add cookies
         for cookie in self.cookies:
             self.driver.add_cookie({
@@ -393,17 +402,17 @@ class ReverseImageAgent:
             })
 
         self.driver.refresh()
-
+        print("test2")
         # Upload
         # results_url = self.upload(image_path)
-        results_url = "https://pimeyes.com/en/results/Jaw_25021534265fta2c3yq4y9f0f54a2?query=ffc0803e1f3ee0c000001981fdffe3db"
-
+        results_url = "https://pimeyes.com/en/results/ERx_250216zv8qkaau7b9wss0823835fb?query=fce1e3fef0c08088001078f1fbf4f27a"
+        time.sleep(2)
         # Get final URL set
         time_start = time.time()
         urls = self.get_results(results_url)
         time_end = time.time()
         print(f"Time to get pimeyes url results: {time_end - time_start} seconds")
-
+        print("test3")
         urls, result = self.scrape_urls(urls, id_name)
 
         # Save URLs to JSON file
