@@ -1,43 +1,39 @@
-from typing import Dict, Any, Optional
 import os
-from dotenv import load_dotenv
 import json
-from groq import Groq
-import time
+from typing import Dict, Any
+from dotenv import load_dotenv
+from openai import OpenAI
+import datetime
 
-# ---------------------------------------------------------
-# 4. Decision (Cross-Checking) Agent (Stub)
-# ---------------------------------------------------------
+deepseek_model = "gpt-4o"
+llama_model = "gpt-4o"
 
-deepseek_model = "deepseek-r1-distill-llama-70b"
-llama_model = "llama-3.3-70b-versatile"
-
+# Simplified prompt that doesn't allow requesting more data
 system_prompt = """
-Given your context, decide if the ID information aligns with the other information we have gathered enough to be confident that the ID is real, or if there are enough misalignments such that we can be confident the ID is fake.
+You are deciding if the ID is valid or not, based on:
+ - ID Data (NAME, ADDRESS, DOB)
+ - Face similarity
+ - OSINT data about the same fields (NAME, ADDRESS, DOB)
 
-Success Criteria:
-- Face photos match with high confidence
-- ID data matches OSINT records
-- No significant discrepancies found
-- No evidence of fraud or manipulation
-- Multiple data points confirm identity
+Return only valid JSON with the following fields:
 
-Red Flags:
-- Face mismatch
-- Address discrepancies
-- Age/DOB inconsistencies
-- Recent ID issuance with older person
-- Conflicting public records
-- Signs of document manipulation
+{
+  "REASONING": "A short text explaining your reasoning.",
+  "ACTION": one of ["FINAL_VALID", "FINAL_INVALID"],
+  "CONFIDENCE_LEVEL": "One of [high, medium, low]"
+}
 
-Return your answer in json format with only the following three fields.
-1. REASONING: reasoning for the decision you are making
-2. CONFIDENCE_LEVEL: high confidence, medium confidence, low confidence
-3. STATUS: valid or invalid
+Criteria for validity:
+- Face match is relatively high (≥0.7).
+- ID data (Name, Address, DOB) is consistent with OSINT data. 
+- No strong red flags (e.g., different name or a totally different DOB from OSINT).
 
+If the data is definitely contradictory, declare FINAL_INVALID.
+If you are confident the ID is real, declare FINAL_VALID.
 """
 
-def create_chat_completion(content, model, client):  # New function to create chat completion
+
+def create_chat_completion(content, model, client):
     return client.chat.completions.create(
         messages=[
             {
@@ -46,49 +42,170 @@ def create_chat_completion(content, model, client):  # New function to create ch
             }
         ],
         model=model,
+        temperature=0,
     )
 
-def extract_json(text):  # Find content between json and markers
-    start_marker = "json"
-    end_marker = "```"
-    
-    try:
-        # Find the start of JSON content
-        start_index = text.find(start_marker) + len(start_marker)
-        
-        # Find the end of JSON content
-        end_index = text.find(end_marker, start_index)
-        
-        if start_index == -1 or end_index == -1:
-            raise ValueError("JSON markers not found in text")
-            
-        # Extract the JSON string
-        json_str = text[start_index:end_index].strip()
-        
-        # Parse the JSON string
-        return json.loads(json_str)
-        
-    except Exception as e:
-        print(f"Error extracting JSON: {e}")
-        return None
 
-def run_groq(content, model, client):
-    chat_completion = create_chat_completion(content, model, client)
-    response_content = chat_completion.choices[0].message.content
-    print(response_content)
-    return extract_json(response_content)
+def parse_dob(dob_str: str):
+    """
+    Attempt to parse an incoming DOB string into a datetime.date object.
+    Handles formats like YYYY-MM-DD, MM/DD/YYYY, etc.
+    Return None if parsing fails.
+    """
+    dob_str = dob_str.strip()
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
+        try:
+            return datetime.datetime.strptime(dob_str, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def compare_dates_or_age(id_dob_str: str, osint_dob_str: str, osint_age_str: str = "") -> str:
+    """
+    Returns one of ["mismatch", "verified", "unknown"].
+
+    1) If OSINT has a DOB string, parse both and check exact match => verified or mismatch.
+    2) Else if OSINT only has an age, check approximate => verified or mismatch.
+    3) If OSINT is missing DOB & age => unknown.
+    """
+    id_date = parse_dob(id_dob_str)
+
+    # If we have an OSINT DOB string
+    if osint_dob_str:
+        osint_date = parse_dob(osint_dob_str)
+        if id_date and osint_date:
+            return "verified" if (id_date == osint_date) else "mismatch"
+        else:
+            # OSINT had a DOB, but we cannot parse it or the ID's. It's effectively mismatch or unknown.
+            return "mismatch" if id_date else "unknown"
+
+    # If we have no OSINT DOB string, but possibly have an age
+    elif osint_age_str:
+        try:
+            osint_age = int(osint_age_str)
+        except ValueError:
+            osint_age = None
+        
+        if id_date and osint_age:
+            current_year = datetime.date.today().year
+            possible_age = current_year - id_date.year
+            # If we're within ~2 years, call it "verified"
+            if abs(possible_age - osint_age) <= 2:
+                return "verified"
+            else:
+                return "mismatch"
+        else:
+            # We have an age, but can't parse ID DOB or the age is invalid => unknown or mismatch
+            return "unknown" if not id_date else "mismatch"
+
+    # If there's absolutely no OSINT DOB or age
+    return "unknown"
+
 
 class DecisionAgent:
     """
     Agent responsible for combining all extracted data and making a final verification decision.
-    Could be powered by an LLM (like Llama, GPT, or other) or a rule-based engine.
+    Potentially an LLM with instructions on how to respond if more data is needed.
     """
     def __init__(self):
-        load_dotenv('.env')  # Load variables from .env
+        load_dotenv('secret.env')  # Load variables from .env
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-        self.client = Groq(
-            api_key=os.environ.get("GROQ_API_KEY"),
+        # Instead of booleans, store "status": in ["verified", "mismatch", "unknown"]
+        self.verification_state = {
+            "name": {"status": "unknown", "confidence": None},
+            "address": {"status": "unknown", "confidence": None},
+            "dob": {"status": "unknown", "confidence": None},
+            "face": {"status": "unknown", "confidence": None}
+        }
+
+    def update_verification_state(self, id_data, face_similarity, osint_data):
+        """Updates the verification state based on current data"""
+
+        # Face verification: either verified or mismatch. 
+        # If face_similarity is < 0.7, that is mismatch if we do have a face comparison.
+        # If we have no face image at all, you could call it unknown, but presumably we do.
+        if face_similarity >= 0.7:
+            self.verification_state["face"] = {
+                "status": "verified",
+                "confidence": face_similarity
+            }
+        else:
+            # If face_similarity is 0 => mismatch
+            # if it's  -1 => maybe unknown if face wasn't recognized, etc. 
+            # But let's keep it simple:
+            self.verification_state["face"] = {
+                "status": "mismatch",
+                "confidence": face_similarity
+            }
+
+        # Compare Name
+        id_name = id_data.get("name", "").strip().lower()
+        osint_name = osint_data.get("person_info", {}).get("full_name", "").strip().lower()
+
+        if not id_name:
+            # If the ID didn't have a name for some reason, call it unknown
+            self.verification_state["name"] = {"status": "unknown", "confidence": None}
+        else:
+            if not osint_name:
+                # OSINT had no name => unknown
+                self.verification_state["name"] = {"status": "unknown", "confidence": None}
+            else:
+                # We have both names
+                if id_name == osint_name:
+                    self.verification_state["name"] = {"status": "verified", "confidence": "high"}
+                else:
+                    self.verification_state["name"] = {"status": "mismatch", "confidence": "low"}
+
+        # Compare DOB
+        id_dob_str = id_data.get("dateOfBirth", "")
+        osint_dob_str = osint_data.get("person_info", {}).get("date_of_birth", "")
+        osint_age_str = osint_data.get("person_info", {}).get("age", "")
+
+        dob_status = compare_dates_or_age(id_dob_str, osint_dob_str, osint_age_str)
+        # You might want a confidence measure, e.g. "high" if verified, else "low"
+        self.verification_state["dob"] = {
+            "status": dob_status,
+            "confidence": "high" if dob_status == "verified" else "low"
+        }
+
+        # Compare Address
+        id_address = (
+            (id_data.get("address-line-1","") + " " + id_data.get("address-line-2",""))
+            .strip()
+            .lower()
         )
+        addresses = osint_data.get("addresses", [])
+
+        if not id_address:
+            self.verification_state["address"] = {"status": "unknown", "confidence": None}
+        else:
+            # We'll see if we find a match in OSINT
+            found_match = False
+            has_any_osint_address = False
+            for addr in addresses:
+                has_any_osint_address = True
+                full_osint_addr = (
+                    addr.get("address","") + " " +
+                    addr.get("city","") + " " +
+                    addr.get("state","") + " " +
+                    addr.get("zip","")
+                ).strip().lower()
+                if full_osint_addr and (
+                    id_address in full_osint_addr or full_osint_addr in id_address
+                ):
+                    found_match = True
+                    break
+            
+            if not has_any_osint_address:
+                # No addresses in OSINT => unknown
+                self.verification_state["address"] = {"status": "unknown", "confidence": None}
+            else:
+                if found_match:
+                    self.verification_state["address"] = {"status": "verified", "confidence": "high"}
+                else:
+                    self.verification_state["address"] = {"status": "mismatch", "confidence": "low"}
 
     def make_final_decision(
         self, 
@@ -97,147 +214,107 @@ class DecisionAgent:
         osint_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Aggregates all sub-agent results and generates a final decision.
-
-        Args:
-            parsed_data (Dict[str, Any]): The structured data from the ID.
-            face_similarity (float): The face similarity score from FaceVerificationAgent.
-            osint_data (Dict[str, Any]): The OSINT findings.
-
-        Returns:
-            Dict[str, Any]: Final decision output, including a confidence score and reasoning.
-                {
-                    "verificationScore": 0.95,
-                    "status": "LIKELY_VALID",
-                    "reasoning": "Face match is 85%. OSINT data consistent."
-                }
+        Return JSON with:
+          - REASONING
+          - ACTION: "FINAL_VALID" | "FINAL_INVALID"
+          - CONFIDENCE_LEVEL
         """
-        # Example logic:
-        #  - If face_similarity < 0.7 => High suspicion
-        #  - If OSINT confidence < 0.5 => Uncertain
-        #  - Additional checks on dateOfBirth vs. OSINT age
-        #  - If no contradictions => likely valid
+        self.update_verification_state(id_data, face_similarity, osint_data)
 
+        # Tally statuses
+        statuses = {f: self.verification_state[f]["status"] for f in ["name","dob","address","face"]}
+        mismatch_count = sum(1 for s in statuses.values() if s == "mismatch")
+        verified_count = sum(1 for s in statuses.values() if s == "verified")
+        unknown_count = sum(1 for s in statuses.values() if s == "unknown")
+
+        # Make immediate decision if clear criteria are met
+        if mismatch_count >= 1:
+            return {
+                "REASONING": f"Found {mismatch_count} mismatched fields: {statuses}",
+                "ACTION": "FINAL_INVALID",
+                "CONFIDENCE_LEVEL": "high" if mismatch_count >= 2 else "medium"
+            }
+
+        if verified_count == 4:
+            return {
+                "REASONING": "All fields verified successfully",
+                "ACTION": "FINAL_VALID",
+                "CONFIDENCE_LEVEL": "high"
+            }
+
+        # Check age consistency between ID and OSINT data
+        id_age = id_data.get("calculatedAge")
+        osint_age = None
+        
+        # Extract age from OSINT data using LLM
+        age_prompt = f"""Given this OSINT data about a person, determine their age. 
+        If multiple ages are found, return the most reliable one.
+        If no exact age is found but you can infer it from other data, do so.
+        Return only a number, or null if you cannot determine the age with reasonable confidence.
+
+        OSINT Data: {json.dumps(osint_data, indent=2)}"""
+
+        age_response = self.client.chat.completions.create(
+            messages=[{"role": "user", "content": age_prompt}],
+            model="gpt-4o",
+            temperature=0
+        )
+        
+        osint_age = age_response.choices[0].message.content.strip()
+        if osint_age.lower() == "null":
+            osint_age = None
+            
+        if id_age and osint_age:
+            try:
+                id_age = int(id_age)
+                osint_age = int(osint_age)
+                
+                # Allow for small discrepancies due to different reference dates
+                if abs(id_age - osint_age) != 0:
+                    return {
+                        "REASONING": f"Age mismatch: ID shows {id_age}, OSINT shows {osint_age}",
+                        "ACTION": "FINAL_INVALID",
+                        "CONFIDENCE_LEVEL": "medium"
+                    }
+            except ValueError:
+                # If age parsing fails, continue with other checks
+                pass
+        
+        # For ambiguous cases, let the LLM make the final call
         content = f"""
         ID Data: {id_data}
         Face Similarity: {face_similarity}
         OSINT Data: {osint_data}
-        """
-        content += system_prompt
-        return run_groq(content, llama_model, self.client)
-    
+        Current Verification State: {json.dumps(self.verification_state, indent=2)}
 
-if __name__ == "__main__":
-    decision_agent = DecisionAgent()
-    mock_id_data = {
-        "name": "Sarah Jane Wilson",
-        "address-line-1": "1234 Maple Street",
-        "address-line-2": "San Francisco, CA 94110",
-        "dateOfBirth": "1992-03-15",
-        "expirationDate": "2025-06-30",
-        "stateOfIssue": "CA",
-        "issueDate": "2021-06-30",
-        "gender": "F",
-        "height": "5'-6\"",
-        "eyeColor": "BRN",
-    }
-    face_similarity = 0.85
-    mock_osint_data = {
-        "person_info": {
-            "full_name": "Sarah Jane Wilson",
-            "age": "31",
-            "date_of_birth": "03/15/1992",
-            "gender": "Female",
-            "aliases": ["Sarah J Wilson", "Sarah Wilson"]
-        },
-        "addresses": [
-            {
-                "current": True,
-                "address": "1234 Maple Street",
-                "city": "San Francisco",
-                "state": "CA",
-                "zip": "94110",
-                "timespan": "2019-present"
-            },
-            {
-                "current": False,
-                "address": "567 Oak Avenue",
-                "city": "Berkeley",
-                "state": "CA",
-                "zip": "94703",
-                "timespan": "2015-2019"
+        Make a final decision based on all available data.
+        Fields verified: {verified_count}
+        Fields unknown: {unknown_count}
+        Fields mismatched: {mismatch_count}
+
+        {system_prompt}
+        """
+
+        chat_completion = create_chat_completion(content, llama_model, self.client)
+        response_text = chat_completion.choices[0].message.content.strip()
+        cleaned_response = response_text.replace("```json", "").replace("```", "").strip()
+
+        try:
+            return json.loads(cleaned_response)
+        except json.JSONDecodeError as e:
+            print(f"JSON parsing error: {e}")
+            # Default to invalid if we can't parse the LLM response
+            return {
+                "REASONING": "Error parsing decision. Defaulting to invalid due to uncertainty.",
+                "ACTION": "FINAL_INVALID",
+                "CONFIDENCE_LEVEL": "low"
             }
-        ],
-        "phone_numbers": [
-            {
-                "number": "(415) 555-0123",
-                "type": "Mobile",
-                "carrier": "Verizon"
-            }
-        ],
-        "relatives": [
-            {
-                "name": "Michael Wilson",
-                "relationship": "Father",
-                "age": "58"
-            },
-            {
-                "name": "Jennifer Wilson",
-                "relationship": "Mother",
-                "age": "56"
-            }
-        ],
-        "employment": [
-            {
-                "employer": "Tech Solutions Inc",
-                "title": "Software Engineer",
-                "timespan": "2018-present"
-            }
-        ],
-        "education": [
-            {
-                "institution": "UC Berkeley",
-                "degree": "BS Computer Science",
-                "graduation_year": "2014"
-            }
-        ],
-        "social_media": [
-            {
-                "platform": "LinkedIn",
-                "profile_url": "linkedin.com/in/sarahjwilson",
-                "last_active": "2023"
-            }
-        ],
-        "public_records": {
-            "property_records": [
-                {
-                    "address": "1234 Maple Street",
-                    "purchase_date": "2019-05",
-                    "purchase_price": "$950,000"
-                }
-            ],
-            "vehicle_registrations": [
-                {
-                    "make": "Toyota",
-                    "model": "RAV4",
-                    "year": "2020",
-                    "state": "CA"
-                }
-            ],
-            "licenses": [
-                {
-                    "type": "Driver's License",
-                    "state": "CA",
-                    "status": "Active",
-                    "expiration": "2025-06-30"
-                }
-            ]
-        },
-        "data_confidence_score": 0.92,
-        "last_updated": "2024-03-15"
-    }
-    start_time = time.time()
-    print(decision_agent.make_final_decision(mock_id_data, face_similarity, mock_osint_data))
-    end_time = time.time()
-    print(f"Time for decision: {end_time - start_time} seconds")
-        
+
+    def reset(self):
+        """Reset the agent's state for a new verification"""
+        self.verification_state = {
+            "name": {"status": "unknown", "confidence": None},
+            "address": {"status": "unknown", "confidence": None},
+            "dob": {"status": "unknown", "confidence": None},
+            "face": {"status": "unknown", "confidence": None}
+        }

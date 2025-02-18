@@ -10,3 +10,5 @@ backend/agents/reverse_image_agent_helpers/profile
 .venv
 backend/agents/profile/
 backend/agents/document_agent_helpers/yolov8n-face.pt
+dashboard/public/uploads-modified*
+dashboard/public/.jpg*

@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv('.env')
+load_dotenv('secret.env')
 
 # Get credentials from environment variables
 key_name = os.getenv('ENDATO_KEY_NAME')
